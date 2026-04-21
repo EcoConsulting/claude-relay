@@ -1,0 +1,13 @@
+{
+    "name": "relay",
+    "version": "0.1.0",
+    "description": "Let local Claude Code sessions talk to each other in natural language.",
+    "author": {
+        "name": "Innestic",
+        "url": "https://github.com/innestic"
+    },
+    "homepage": "https://github.com/innestic/claude-relay",
+    "repository": "https://github.com/innestic/claude-relay",
+    "license": "MIT",
+    "keywords": ["mcp", "claude-code", "multi-agent", "messaging"]
+}

@@ -1,0 +1,15 @@
+{
+    "name": "claude-relay",
+    "owner": {
+        "name": "Innestic",
+        "url": "https://github.com/innestic"
+    },
+    "plugins": [
+        {
+            "name": "relay",
+            "source": "./",
+            "description": "Let local Claude Code sessions talk to each other in natural language",
+            "version": "0.1.0"
+        }
+    ]
+}
