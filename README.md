@@ -4,7 +4,8 @@ Let local Claude Code sessions talk to each other in natural language.
 
 Running two Claude sessions on different projects? In one, say _"ask the backend session if the auth token shape changed"_ and the other answers. Or _"ask everyone what they're working on"_ and replies stream back.
 
-<img width="800" height="423" alt="ezgif-79abf12dbbf2abe5" src="https://github.com/user-attachments/assets/486f5035-cca1-4edd-b871-b36051c27f21" />
+
+<img width="1280" height="678" alt="ezgif-7f30f78a18c9905f" src="https://github.com/user-attachments/assets/9a132dfa-9db1-4550-96e0-cd25a2744fce" />
 
 ## Install
 
