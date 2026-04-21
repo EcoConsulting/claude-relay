@@ -40,21 +40,29 @@ export async function relayPeers(ctx: ChannelContext): Promise<ToolResult> {
     return okResult({ me: ctx.getName(), peers: reply.peers });
 }
 
+export type RenameResult = { ok: true } | { ok: false; code: ErrCode };
+
+export async function renameWithHub(ctx: ChannelContext, newName: string): Promise<RenameResult> {
+    const reply = await ctx
+        .getHub()
+        .sendRequest({ type: "rename", new_name: newName }, ctx.requestTimeoutMs);
+    if (reply.type === "ack") {
+        ctx.setName(newName);
+        return { ok: true };
+    }
+    if (reply.type === "err") return { ok: false, code: reply.code };
+    return { ok: false, code: "unexpected" };
+}
+
 export async function relayRename(
     ctx: ChannelContext,
     args: Record<string, unknown>,
 ): Promise<ToolResult> {
     const newName = args.new_name;
     if (typeof newName !== "string") return errResult("bad_args");
-    const reply = await ctx
-        .getHub()
-        .sendRequest({ type: "rename", new_name: newName }, ctx.requestTimeoutMs);
-    if (reply.type === "ack") {
-        ctx.setName(newName);
-        return okResult({ ok: true, name: newName });
-    }
-    if (reply.type === "err") return errResult(reply.code);
-    return errResult("unexpected");
+    const result = await renameWithHub(ctx, newName);
+    if (result.ok) return okResult({ ok: true, name: newName });
+    return errResult(result.code);
 }
 
 export async function relayAsk(

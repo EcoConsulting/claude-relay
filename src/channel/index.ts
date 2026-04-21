@@ -1,7 +1,7 @@
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { execFileSync } from "node:child_process";
-import { defaultName } from "../identity";
+import { claudeSessionName, claudeSessionPath, defaultName } from "../identity";
 import { makeLogger } from "../logger";
 import { HUB_SOCKET_PATH, type ServerMsg } from "../protocol";
 import { bootstrapHub, type HubRole } from "./bootstrap";
@@ -10,8 +10,14 @@ import { createPendingBroadcasts } from "./pending-broadcasts";
 import { createReconnector } from "./reconnect";
 import { registerWithRetries } from "./register";
 import { buildEmitNotification, wireHubRouting } from "./routing";
+import { startSessionWatcher } from "./session-watcher";
 import { TOOLS, type ToolSchema } from "./tool-schemas";
-import { callTool as dispatchTool, type ChannelContext, type ToolResult } from "./tools";
+import {
+    callTool as dispatchTool,
+    renameWithHub,
+    type ChannelContext,
+    type ToolResult,
+} from "./tools";
 
 const log = makeLogger("channel");
 
@@ -82,7 +88,8 @@ export async function startChannel(opts: StartChannelOptions = {}): Promise<Chan
     wireIncoming(bootstrap.hub);
 
     const gitBranch = detectGitBranch();
-    const candidate = defaultName(process.cwd());
+    const onDiskName = claudeSessionName();
+    const candidate = onDiskName ?? defaultName(process.cwd());
     let name = opts.skipRegister
         ? candidate
         : await registerWithRetries(
@@ -166,10 +173,28 @@ export async function startChannel(opts: StartChannelOptions = {}): Promise<Chan
         dispatchTool(ctx, toolName, args),
     );
 
+    const sessionWatcher = opts.skipRegister
+        ? null
+        : startSessionWatcher({
+              sessionPath: claudeSessionPath(),
+              initialName: onDiskName,
+              onName: async (newName) => {
+                  if (newName === name) return;
+                  const result = await renameWithHub(ctx, newName);
+                  if (!result.ok) {
+                      log.warn("session_watcher_rename_failed", {
+                          attempted: newName,
+                          code: result.code,
+                      });
+                  }
+              },
+          });
+
     const close = async (): Promise<void> => {
         if (closed) return;
         closed = true;
         log.info("channel_close");
+        if (sessionWatcher !== null) sessionWatcher.close();
         reconnector.close();
         pendingBroadcasts.clear();
         try {

@@ -44,7 +44,7 @@ Try:
 - _"ask backend-api what they're working on"_
 - _"ask everyone to report status"_
 
-Rename your session: `/relay-rename backend-api`. Natural language works too (_"call yourself backend-api"_), but the slash command is faster.
+Rename your session: `/relay-rename backend-api`. Natural language works too (_"call yourself backend-api"_), but the slash command is faster. Claude Code's built-in `/rename` also auto-syncs.
 
 ### Tools
 
@@ -78,10 +78,10 @@ If two sessions share a slugged basename (both `~/Code/backend/api`), Relay suff
 
 ## Debugging
 
-Plugin install stores data under `~/.claude/plugins/data/relay-claude-relay/` (exposed to the server as `$CLAUDE_PLUGIN_DATA`). Manual install uses `~/.claude-relay/`. Substitute the right one below.
+Runtime data lives under `$CLAUDE_PLUGIN_DATA` (`~/.claude/plugins/data/relay-claude-relay/`).
 
 ```bash
-DATA=~/.claude/plugins/data/relay-claude-relay  # or ~/.claude-relay
+DATA=~/.claude/plugins/data/relay-claude-relay
 tail -f "$DATA/logs/relay-$(date +%Y-%m-%d).log" | jq   # today's log
 pgrep -f hub-daemon.ts                                  # hub alive?
 pkill -f hub-daemon.ts && rm -f "$DATA/hub.sock"        # force reset
@@ -107,46 +107,26 @@ Details: [docs/architecture.md](docs/architecture.md).
 - Single user per machine; no auth or access control
 - Same-host only; no cross-machine relaying
 
-## Manual install (without the plugin)
+## Development
 
 Requires [Bun](https://bun.sh) and Claude Code 2.1.80+.
 
 ```bash
-git clone https://github.com/innestic/claude-relay ~/claude-relay
-cd ~/claude-relay && bun install
-```
-
-Add to each project's `.mcp.json`:
-
-```json
-{
-    "mcpServers": {
-        "relay": {
-            "command": "bun",
-            "args": ["run", "${HOME}/claude-relay/src/main.ts"]
-        }
-    }
-}
-```
-
-Launch sessions with the channel capability pointed at the manual MCP name:
-
-```bash
-claude --dangerously-load-development-channels server:relay
-```
-
-(Plugin installs use `plugin:relay@claude-relay` instead — see step 3 above.)
-
-Copy `.claude/commands/relay-rename.md` into your project to get the `/relay-rename` slash command.
-
-## Development
-
-```bash
-bun install
+git clone https://github.com/innestic/claude-relay
+cd claude-relay && bun install
 bun run check   # typecheck + lint + format + test
 ```
 
-Source under `src/`. Each module has a sibling `.test.ts`. Open an issue before sending a PR so we can align on scope.
+For a live-reload loop (edits hit Claude Code on restart), bypass the plugin with a project-scope `.mcp.json`:
+
+```bash
+cp .mcp.json.example .mcp.json
+/plugin uninstall relay@claude-relay
+```
+
+Launch Claude Code with `--dangerously-load-development-channels server:relay` (note `server:`, since the MCP is now manually registered). Reinstall the plugin when you're done. `.mcp.json` is gitignored.
+
+Open an issue before a PR so we can align on scope.
 
 ## License
 
