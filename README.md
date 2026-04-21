@@ -6,14 +6,35 @@ Running two Claude sessions on different projects? In one, say _"ask the backend
 
 ## Install
 
-Claude Relay ships as a Claude Code plugin. From any Claude Code session:
+Claude Relay ships as a Claude Code plugin. Three steps.
+
+### 1. Add the marketplace
+
+From any Claude Code session:
 
 ```
 /plugin marketplace add innestic/claude-relay
+```
+
+### 2. Install the plugin
+
+```
 /plugin install relay@claude-relay
 ```
 
-That's it. The plugin registers the MCP server and slash commands for you. Restart Claude Code so the channel capability loads, then open two sessions in different project dirs.
+This registers the MCP server and slash commands.
+
+### 3. Launch sessions with the channel capability
+
+Relay delivers inbound messages via `notifications/claude/channel` — a Claude Code capability still in research preview. Every session that should send or receive messages must be launched with:
+
+```bash
+claude --dangerously-load-development-channels plugin:relay@claude-relay
+```
+
+The `dangerously-` prefix is required until Anthropic promotes the channels capability to general availability and adds this plugin to the trusted allowlist. We will submit for review and drop the flag as soon as it's approved.
+
+Open two sessions in different project dirs and try the examples below.
 
 ## Usage
 
@@ -108,7 +129,15 @@ Add to each project's `.mcp.json`:
 }
 ```
 
-Launch with `claude --dangerously-load-development-channels server:relay`. Copy `.claude/commands/relay-rename.md` into your project to get the slash command.
+Launch sessions with the channel capability pointed at the manual MCP name:
+
+```bash
+claude --dangerously-load-development-channels server:relay
+```
+
+(Plugin installs use `plugin:relay@claude-relay` instead — see step 3 above.)
+
+Copy `.claude/commands/relay-rename.md` into your project to get the `/relay-rename` slash command.
 
 ## Development
 
