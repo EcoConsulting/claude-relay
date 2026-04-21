@@ -9,5 +9,11 @@
     "homepage": "https://github.com/innestic/claude-relay",
     "repository": "https://github.com/innestic/claude-relay",
     "license": "MIT",
-    "keywords": ["mcp", "claude-code", "multi-agent", "messaging"]
+    "keywords": ["mcp", "claude-code", "multi-agent", "messaging"],
+    "mcpServers": {
+        "relay": {
+            "command": "bun",
+            "args": ["run", "${CLAUDE_PLUGIN_ROOT}/src/main.ts"]
+        }
+    }
 }

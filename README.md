@@ -91,8 +91,8 @@ Details: [docs/architecture.md](docs/architecture.md).
 Requires [Bun](https://bun.sh) and Claude Code 2.1.80+.
 
 ```bash
-git clone https://github.com/innestic/claude-relay ~/.claude-relay-src
-cd ~/.claude-relay-src && bun install
+git clone https://github.com/innestic/claude-relay ~/claude-relay
+cd ~/claude-relay && bun install
 ```
 
 Add to each project's `.mcp.json`:
@@ -102,7 +102,7 @@ Add to each project's `.mcp.json`:
     "mcpServers": {
         "relay": {
             "command": "bun",
-            "args": ["run", "${HOME}/.claude-relay-src/src/main.ts"]
+            "args": ["run", "${HOME}/claude-relay/src/main.ts"]
         }
     }
 }
