@@ -55,7 +55,8 @@ export const TOOLS: ToolSchema[] = [
     },
     {
         name: "relay_broadcast",
-        description: "Broadcast a question to all other peers.",
+        description:
+            "Broadcast a question to ALL other peers on this machine, including sessions on unrelated projects. Use ONLY when the user explicitly wants every session asked. Do NOT use as a fallback when relay_ask returns an error (peer_not_found, peer_gone, timeout); surface the error to the user and let them decide. If you want to reach a specific peer, use relay_ask.",
         inputSchema: {
             type: "object",
             properties: {

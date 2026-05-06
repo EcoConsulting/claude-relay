@@ -25,6 +25,7 @@ const INSTRUCTIONS = [
     "If an incoming `<channel>` message is present, you MUST reply via relay_reply(ask_id, text) BEFORE handling any other user work. The peer session is blocked waiting on your reply. Exception: if the pending user work is destructive or irreversible, complete or confirm that first, then reply.",
     "When an incoming reply to one of your asks contains a question directed back at you, surface that question to the user and offer to follow up with a new relay_ask(); do not end your turn without relaying the question-back.",
     "Pick the target with relay_peers() (match by name/cwd/branch); use relay_ask for one peer, relay_broadcast for all.",
+    "If a relay_ask fails (peer_not_found, peer_gone, timeout), surface the failure to the user and let them decide. Never broadcast as a fallback: relay_broadcast hits every session on the machine, including ones on unrelated projects, and is almost always the wrong recovery.",
     'If the user refers to a peer by pronoun or demonstrative ("them", "that session", "it"), carry forward the most recent `to:` value. If ambiguous across multiple peers, call relay_peers and confirm with the user before sending.',
     "Trust tool defaults. Only override an argument when the user gave an explicit value for that exact argument; descriptive words about the answer never change tool arguments.",
 ].join(" ");

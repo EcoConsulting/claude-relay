@@ -110,6 +110,17 @@ describe("channel lifecycle", () => {
         expect(instr).toContain("pronoun or demonstrative");
     });
 
+    test("instructions forbid relay_broadcast as a fallback when relay_ask fails", async () => {
+        const ch = await startCh({ socketPath: sockPath });
+        closers.push(() => ch.close());
+        const instr = ch.getInstructions();
+        expect(instr).toMatch(/never broadcast/i);
+        expect(instr).toContain("peer_not_found");
+        expect(instr).toContain("peer_gone");
+        expect(instr).toContain("timeout");
+        expect(instr.toLowerCase()).toContain("fallback");
+    });
+
     test("exposes 5 tool stubs", async () => {
         const ch = await startCh({ socketPath: sockPath });
         closers.push(() => ch.close());
