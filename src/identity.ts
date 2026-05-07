@@ -62,3 +62,18 @@ export function claudeSessionName(opts: ClaudeSessionNameOptions = {}): string |
     if (typeof name !== "string") return null;
     return sanitizeSessionName(name);
 }
+
+export function hasFixedRelayPeerIdentity(): boolean {
+    const raw = process.env.RELAY_PEER_ID;
+    if (raw === undefined) return false;
+    return sanitizeSessionName(raw) !== null;
+}
+
+export function resolveSessionName(cwd: string): string {
+    const envName = process.env.RELAY_PEER_ID;
+    if (envName !== undefined) {
+        const sanitized = sanitizeSessionName(envName);
+        if (sanitized !== null) return sanitized;
+    }
+    return claudeSessionName() ?? defaultName(cwd);
+}

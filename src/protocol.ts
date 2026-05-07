@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { hubSocketPath } from "./data-dir";
 
-export const PROTOCOL_VERSION = "2";
+export const PROTOCOL_VERSION = "3";
 
 export const RegisterMsg = z.object({
     type: z.literal("register"),
@@ -44,6 +44,36 @@ export const BroadcastMsg = z.object({
     exclude_self: z.boolean().optional(),
 });
 
+export const PongMsg = z.object({
+    type: z.literal("pong"),
+    req_id: z.string(),
+});
+
+export const JoinRoomMsg = z.object({
+    type: z.literal("join_room"),
+    room: z.string(),
+    req_id: z.string().optional(),
+});
+
+export const LeaveRoomMsg = z.object({
+    type: z.literal("leave_room"),
+    room: z.string(),
+    req_id: z.string().optional(),
+});
+
+export const RoomMsgMsg = z.object({
+    type: z.literal("room_msg"),
+    room: z.string(),
+    text: z.string(),
+    msg_id: z.string(),
+    req_id: z.string().optional(),
+});
+
+export const ListRoomsMsg = z.object({
+    type: z.literal("list_rooms"),
+    req_id: z.string().optional(),
+});
+
 export const ClientMsgSchema = z.discriminatedUnion("type", [
     RegisterMsg,
     RenameMsg,
@@ -51,6 +81,11 @@ export const ClientMsgSchema = z.discriminatedUnion("type", [
     AskMsg,
     ReplyMsg,
     BroadcastMsg,
+    PongMsg,
+    JoinRoomMsg,
+    LeaveRoomMsg,
+    RoomMsgMsg,
+    ListRoomsMsg,
 ]);
 
 export const AckMsg = z.object({
@@ -120,6 +155,44 @@ export const BroadcastAckMsg = z.object({
     peer_count: z.number(),
 });
 
+export const PingMsg = z.object({
+    type: z.literal("ping"),
+    req_id: z.string(),
+});
+
+export const RoomAckMsg = z.object({
+    type: z.literal("room_ack"),
+    room: z.string(),
+    members: z.array(z.string()),
+    req_id: z.string().optional(),
+});
+
+export const RoomSendAckMsg = z.object({
+    type: z.literal("room_send_ack"),
+    room: z.string(),
+    delivered_count: z.number(),
+    req_id: z.string().optional(),
+});
+
+export const IncomingRoomMsgMsg = z.object({
+    type: z.literal("incoming_room_msg"),
+    room: z.string(),
+    from: z.string(),
+    text: z.string(),
+    msg_id: z.string(),
+});
+
+export const RoomsListMsg = z.object({
+    type: z.literal("rooms_list"),
+    rooms: z.array(
+        z.object({
+            name: z.string(),
+            members: z.array(z.string()),
+        }),
+    ),
+    req_id: z.string().optional(),
+});
+
 export const ServerMsgSchema = z.discriminatedUnion("type", [
     AckMsg,
     ErrMsg,
@@ -127,6 +200,11 @@ export const ServerMsgSchema = z.discriminatedUnion("type", [
     IncomingAskMsg,
     IncomingReplyMsg,
     BroadcastAckMsg,
+    PingMsg,
+    RoomAckMsg,
+    RoomSendAckMsg,
+    IncomingRoomMsgMsg,
+    RoomsListMsg,
 ]);
 
 export type ClientMsg = z.infer<typeof ClientMsgSchema>;

@@ -37,3 +37,19 @@ export function buildAskErrorNotification(askId: string, code: ErrCode): Channel
         params: { content: "", meta: { ask_id: askId, code } },
     };
 }
+
+export function buildRoomMsgNotification(
+    msg: Extract<ServerMsg, { type: "incoming_room_msg" }>,
+): ChannelNotification {
+    return {
+        method: METHOD,
+        params: {
+            content: msg.text,
+            meta: {
+                from: msg.from,
+                room: msg.room,
+                msg_id: msg.msg_id,
+            },
+        },
+    };
+}

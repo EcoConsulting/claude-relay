@@ -110,12 +110,22 @@ describe("channel lifecycle", () => {
         expect(instr).toContain("pronoun or demonstrative");
     });
 
-    test("exposes 5 tool stubs", async () => {
+    test("exposes 9 tool stubs (5 core + 4 rooms)", async () => {
         const ch = await startCh({ socketPath: sockPath });
         closers.push(() => ch.close());
         const tools = ch.getToolNames();
         expect(tools.sort()).toEqual(
-            ["relay_ask", "relay_broadcast", "relay_peers", "relay_rename", "relay_reply"].sort(),
+            [
+                "relay_ask",
+                "relay_broadcast",
+                "relay_join",
+                "relay_leave",
+                "relay_peers",
+                "relay_rename",
+                "relay_reply",
+                "relay_room",
+                "relay_rooms",
+            ].sort(),
         );
     });
 

@@ -1,20 +1,28 @@
 import type * as net from "node:net";
 import type { z } from "zod";
+import { sanitizeSessionName } from "../identity";
 import { makeLogger } from "../logger";
 import {
     PROTOCOL_VERSION,
     type AskMsg,
     type BroadcastMsg,
+    type JoinRoomMsg,
+    type LeaveRoomMsg,
     type ListPeersMsg,
+    type ListRoomsMsg,
     type RegisterMsg,
     type RenameMsg,
     type ReplyMsg,
+    type RoomMsgMsg,
     type ServerMsg,
 } from "../protocol";
 import type { PendingAsks } from "./pending-asks";
 import type { PeerRegistry } from "./registry";
 
 const log = makeLogger("hub");
+
+export const MAX_ROOMS = 50;
+export const MAX_MEMBERS_PER_ROOM = 20;
 
 export type HubContext = {
     registry: PeerRegistry;
@@ -25,12 +33,12 @@ export type HubContext = {
 
 type Send = (m: ServerMsg) => void;
 
-export function handleRegister(
+export async function handleRegister(
     ctx: HubContext,
     socket: net.Socket,
     msg: z.infer<typeof RegisterMsg>,
     send: Send,
-): void {
+): Promise<void> {
     if (msg.protocol_version !== PROTOCOL_VERSION) {
         log.warn("register_protocol_mismatch", {
             name: msg.name,
@@ -39,7 +47,7 @@ export function handleRegister(
         });
         return send({ type: "err", code: "protocol_mismatch" });
     }
-    const result = ctx.registry.register(socket, msg);
+    const result = await ctx.registry.register(socket, msg);
     if (result === "already_registered") return send({ type: "err", code: "already_registered" });
     if (result === "name_taken") return send({ type: "err", code: "name_taken" });
     send({ type: "ack" });
@@ -206,4 +214,153 @@ export function handleBroadcast(
     }
     log.info("broadcast", { from: caller, broadcast_id: msg.broadcast_id, peer_count: peerCount });
     send({ type: "broadcast_ack", broadcast_id: msg.broadcast_id, peer_count: peerCount });
+}
+
+export function handleJoinRoom(
+    ctx: HubContext,
+    socket: net.Socket,
+    msg: z.infer<typeof JoinRoomMsg>,
+    send: Send,
+): void {
+    const name = ctx.registry.getName(socket);
+    if (!name) {
+        log.warn("join_room_err", { code: "not_registered", room: msg.room });
+        return send({ type: "err", code: "not_registered" });
+    }
+    const sanitized = sanitizeSessionName(msg.room);
+    if (sanitized === null) {
+        log.warn("join_room_err", {
+            code: "bad_args",
+            reason: "invalid_room_name",
+            room: msg.room,
+        });
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "invalid room name",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    }
+    const existingMembers = ctx.registry.getRoomMembers(sanitized);
+    const isExistingRoom = existingMembers.length > 0;
+    if (!isExistingRoom && ctx.registry.listRooms().length >= MAX_ROOMS) {
+        log.warn("join_room_err", { code: "bad_args", reason: "room_limit", room: sanitized });
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: `room_limit_reached (max ${MAX_ROOMS})`,
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    }
+    if (!existingMembers.includes(name) && existingMembers.length >= MAX_MEMBERS_PER_ROOM) {
+        log.warn("join_room_err", { code: "bad_args", reason: "member_limit", room: sanitized });
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: `member_limit_reached (max ${MAX_MEMBERS_PER_ROOM})`,
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    }
+    const members = ctx.registry.joinRoom(name, sanitized);
+    log.info("join_room", { peer: name, room: sanitized, members: members.length });
+    send({
+        type: "room_ack",
+        room: sanitized,
+        members,
+        ...(msg.req_id ? { req_id: msg.req_id } : {}),
+    });
+}
+
+export function handleLeaveRoom(
+    ctx: HubContext,
+    socket: net.Socket,
+    msg: z.infer<typeof LeaveRoomMsg>,
+    send: Send,
+): void {
+    const name = ctx.registry.getName(socket);
+    if (!name) {
+        log.warn("leave_room_err", { code: "not_registered", room: msg.room });
+        return send({ type: "err", code: "not_registered" });
+    }
+    const sanitized = sanitizeSessionName(msg.room);
+    if (sanitized === null) {
+        log.warn("leave_room_err", {
+            code: "bad_args",
+            reason: "invalid_room_name",
+            room: msg.room,
+        });
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "invalid room name",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    }
+    ctx.registry.leaveRoom(name, sanitized);
+    log.info("leave_room", { peer: name, room: sanitized });
+    send({ type: "ack", ...(msg.req_id ? { req_id: msg.req_id } : {}) });
+}
+
+export function handleRoomMsg(
+    ctx: HubContext,
+    socket: net.Socket,
+    msg: z.infer<typeof RoomMsgMsg>,
+    send: Send,
+): void {
+    const sender = ctx.registry.getName(socket);
+    if (!sender) {
+        log.warn("room_msg_err", { code: "not_registered", room: msg.room });
+        return send({ type: "err", code: "not_registered" });
+    }
+    const sanitized = sanitizeSessionName(msg.room);
+    if (sanitized === null) {
+        log.warn("room_msg_err", { code: "bad_args", reason: "invalid_room_name", room: msg.room });
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "invalid room name",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    }
+    const members = ctx.registry.getRoomMembers(sanitized);
+    let deliveredCount = 0;
+    for (const member of members) {
+        if (member === sender) continue;
+        const delivered = ctx.sendTo(member, {
+            type: "incoming_room_msg",
+            room: sanitized,
+            from: sender,
+            text: msg.text,
+            msg_id: msg.msg_id,
+        });
+        if (delivered) deliveredCount++;
+    }
+    log.info("room_msg", {
+        from: sender,
+        room: sanitized,
+        msg_id: msg.msg_id,
+        delivered_count: deliveredCount,
+    });
+    send({
+        type: "room_send_ack",
+        room: sanitized,
+        delivered_count: deliveredCount,
+        ...(msg.req_id ? { req_id: msg.req_id } : {}),
+    });
+}
+
+export function handleListRooms(
+    ctx: HubContext,
+    socket: net.Socket,
+    msg: z.infer<typeof ListRoomsMsg>,
+    send: Send,
+): void {
+    const caller = ctx.registry.getName(socket);
+    const roomsList = ctx.registry.listRooms();
+    log.debug("list_rooms", { caller, count: roomsList.length });
+    send({
+        type: "rooms_list",
+        rooms: roomsList,
+        ...(msg.req_id ? { req_id: msg.req_id } : {}),
+    });
 }

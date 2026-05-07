@@ -454,6 +454,274 @@ describe("hub handlers", () => {
         c.close();
     });
 
+    test("join_room without registering errs not_registered", async () => {
+        const a = await rawConnect(sockPath);
+        a.send({ type: "join_room", room: "x" });
+        const reply = await a.next();
+        expect(reply.type).toBe("err");
+        if (reply.type === "err") expect(reply.code).toBe("not_registered");
+        a.close();
+    });
+
+    test("join_room with invalid room name returns bad_args", async () => {
+        const a = await rawConnect(sockPath);
+        a.send({
+            type: "register",
+            name: "alice",
+            cwd: "/tmp/a",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await a.next();
+        a.send({ type: "join_room", room: "bad room with spaces" });
+        const reply = await a.next();
+        expect(reply.type).toBe("err");
+        if (reply.type === "err") {
+            expect(reply.code).toBe("bad_args");
+            expect(reply.message).toContain("invalid room name");
+        }
+        a.close();
+    });
+
+    test("join_room creates room and returns members in room_ack", async () => {
+        const a = await rawConnect(sockPath);
+        a.send({
+            type: "register",
+            name: "alice",
+            cwd: "/tmp/a",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await a.next();
+        a.send({ type: "join_room", room: "diseno" });
+        const reply = await a.next();
+        expect(reply.type).toBe("room_ack");
+        if (reply.type === "room_ack") {
+            expect(reply.room).toBe("diseno");
+            expect(reply.members).toEqual(["alice"]);
+        }
+        a.close();
+    });
+
+    test("two peers join same room and the second sees both", async () => {
+        const a = await rawConnect(sockPath);
+        const b = await rawConnect(sockPath);
+        a.send({
+            type: "register",
+            name: "alice",
+            cwd: "/tmp/a",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await a.next();
+        b.send({
+            type: "register",
+            name: "bob",
+            cwd: "/tmp/b",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await b.next();
+        a.send({ type: "join_room", room: "team" });
+        await a.next();
+        b.send({ type: "join_room", room: "team" });
+        const r = await b.next();
+        expect(r.type).toBe("room_ack");
+        if (r.type === "room_ack") {
+            expect(r.members.sort()).toEqual(["alice", "bob"]);
+        }
+        a.close();
+        b.close();
+    });
+
+    test("leave_room is idempotent (ack even if room does not exist)", async () => {
+        const a = await rawConnect(sockPath);
+        a.send({
+            type: "register",
+            name: "alice",
+            cwd: "/tmp/a",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await a.next();
+        a.send({ type: "leave_room", room: "ghost-room" });
+        const r = await a.next();
+        expect(r.type).toBe("ack");
+        a.close();
+    });
+
+    test("room_msg fans out to members excluding sender; room_send_ack carries delivered_count", async () => {
+        const a = await rawConnect(sockPath);
+        const b = await rawConnect(sockPath);
+        const c = await rawConnect(sockPath);
+        a.send({
+            type: "register",
+            name: "alice",
+            cwd: "/tmp/a",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await a.next();
+        b.send({
+            type: "register",
+            name: "bob",
+            cwd: "/tmp/b",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await b.next();
+        c.send({
+            type: "register",
+            name: "carol",
+            cwd: "/tmp/c",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await c.next();
+        for (const peer of [a, b, c]) {
+            peer.send({ type: "join_room", room: "team" });
+            await peer.next();
+        }
+        a.send({ type: "room_msg", room: "team", text: "hi all", msg_id: "m1" });
+        const ack = await a.next();
+        expect(ack.type).toBe("room_send_ack");
+        if (ack.type === "room_send_ack") {
+            expect(ack.delivered_count).toBe(2);
+            expect(ack.room).toBe("team");
+        }
+        const bIncoming = await b.next();
+        const cIncoming = await c.next();
+        expect(bIncoming.type).toBe("incoming_room_msg");
+        expect(cIncoming.type).toBe("incoming_room_msg");
+        if (bIncoming.type === "incoming_room_msg") {
+            expect(bIncoming.from).toBe("alice");
+            expect(bIncoming.text).toBe("hi all");
+            expect(bIncoming.msg_id).toBe("m1");
+            expect(bIncoming.room).toBe("team");
+        }
+        a.close();
+        b.close();
+        c.close();
+    });
+
+    test("room_msg with sender NOT a member still delivers (open walkie-talkie)", async () => {
+        const sender = await rawConnect(sockPath);
+        const member = await rawConnect(sockPath);
+        sender.send({
+            type: "register",
+            name: "outsider",
+            cwd: "/tmp/o",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await sender.next();
+        member.send({
+            type: "register",
+            name: "insider",
+            cwd: "/tmp/i",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await member.next();
+        member.send({ type: "join_room", room: "club" });
+        await member.next();
+        sender.send({ type: "room_msg", room: "club", text: "ping", msg_id: "m9" });
+        const ack = await sender.next();
+        expect(ack.type).toBe("room_send_ack");
+        if (ack.type === "room_send_ack") expect(ack.delivered_count).toBe(1);
+        const incoming = await member.next();
+        expect(incoming.type).toBe("incoming_room_msg");
+        if (incoming.type === "incoming_room_msg") {
+            expect(incoming.from).toBe("outsider");
+        }
+        sender.close();
+        member.close();
+    });
+
+    test("list_rooms returns active rooms with members", async () => {
+        const a = await rawConnect(sockPath);
+        const b = await rawConnect(sockPath);
+        a.send({
+            type: "register",
+            name: "alice",
+            cwd: "/tmp/a",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await a.next();
+        b.send({
+            type: "register",
+            name: "bob",
+            cwd: "/tmp/b",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await b.next();
+        a.send({ type: "join_room", room: "diseno" });
+        await a.next();
+        a.send({ type: "join_room", room: "code" });
+        await a.next();
+        b.send({ type: "join_room", room: "diseno" });
+        await b.next();
+        b.send({ type: "list_rooms" });
+        const r = await b.next();
+        expect(r.type).toBe("rooms_list");
+        if (r.type === "rooms_list") {
+            const sorted = r.rooms.slice().sort((x, y) => x.name.localeCompare(y.name));
+            expect(sorted).toHaveLength(2);
+            expect(sorted[0]!.name).toBe("code");
+            expect(sorted[0]!.members).toEqual(["alice"]);
+            expect(sorted[1]!.name).toBe("diseno");
+            expect(sorted[1]!.members.sort()).toEqual(["alice", "bob"]);
+        }
+        a.close();
+        b.close();
+    });
+
+    test("removeBySocket on disconnect cleans peer from rooms (room_msg delivered_count drops)", async () => {
+        const a = await rawConnect(sockPath);
+        const b = await rawConnect(sockPath);
+        const c = await rawConnect(sockPath);
+        a.send({
+            type: "register",
+            name: "alice",
+            cwd: "/tmp/a",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await a.next();
+        b.send({
+            type: "register",
+            name: "bob",
+            cwd: "/tmp/b",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await b.next();
+        c.send({
+            type: "register",
+            name: "carol",
+            cwd: "/tmp/c",
+            git_branch: "",
+            protocol_version: PROTOCOL_VERSION,
+        });
+        await c.next();
+        for (const peer of [a, b, c]) {
+            peer.send({ type: "join_room", room: "team" });
+            await peer.next();
+        }
+        // Bob disconnects abruptly
+        b.close();
+        await new Promise((r) => setTimeout(r, 50));
+        a.send({ type: "room_msg", room: "team", text: "ping", msg_id: "m2" });
+        const ack = await a.next();
+        if (ack.type === "room_send_ack") {
+            expect(ack.delivered_count).toBe(1); // only carol
+        }
+        a.close();
+        c.close();
+    });
+
     test("broadcast with exclude_self=false and one peer round-trips to self", async () => {
         const a = await rawConnect(sockPath);
         a.send({

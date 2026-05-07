@@ -2,7 +2,9 @@
 
 Let local Claude Code sessions talk to each other in natural language.
 
-Running two Claude sessions on different projects? In one, say _"ask the backend session if the auth token shape changed"_ and the other answers. Or _"ask everyone what they're working on"_ and replies stream back.
+Running two Claude sessions on different projects? In one, say _"ask the backend session if the auth token shape changed"_ and the other answers. Or _"ask everyone what they're working on"_ and replies stream back. Need a subgroup chat? Use rooms.
+
+> **This is an Eco Consulting internal fork (v0.2.0)** of [innestic/claude-relay](https://github.com/innestic/claude-relay). The public marketplace ships v0.1.0; this branch adds **fixed identity** (no more zombie suffixes on restart) and **ephemeral rooms** for subgroup coordination. See [CHANGELOG.md](CHANGELOG.md) for details. Not currently published to the marketplace.
 
 <img width="1280" height="678" alt="ezgif-7f30f78a18c9905f" src="https://github.com/user-attachments/assets/9a132dfa-9db1-4550-96e0-cd25a2744fce" />
 
@@ -50,17 +52,45 @@ Rename your session: `/relay-rename backend-api`. Natural language works too (_"
 
 ### Tools
 
-| Tool              | What it does                                                       |
-| ----------------- | ------------------------------------------------------------------ |
-| `relay_peers`     | List active sessions on this machine                               |
-| `relay_ask`       | Ask one peer; returns immediately, reply arrives as a notification |
-| `relay_reply`     | Answer an incoming ask by `ask_id`                                 |
-| `relay_broadcast` | Ask every other peer; replies stream back as notifications         |
-| `relay_rename`    | Rename this session                                                |
+| Tool              | What it does                                                               |
+| ----------------- | -------------------------------------------------------------------------- |
+| `relay_peers`     | List active sessions on this machine                                       |
+| `relay_ask`       | Ask one peer; returns immediately, reply arrives as a notification         |
+| `relay_reply`     | Answer an incoming ask by `ask_id`                                         |
+| `relay_broadcast` | Ask every other peer; replies stream back as notifications                 |
+| `relay_rename`    | Rename this session                                                        |
+| `relay_join`      | Join an ephemeral room (created implicitly on first join) — **v0.2**       |
+| `relay_leave`     | Leave a room (destroyed implicitly when the last member leaves) — **v0.2** |
+| `relay_room`      | Send a fire-and-forget message to all members of a room — **v0.2**         |
+| `relay_rooms`     | List all active rooms with their members — **v0.2**                        |
 
 Claude routes to these automatically. You rarely call them by name.
 
-If two sessions share a slugged basename (both `~/Code/backend/api`), Relay suffixes `-2`, `-3`. Use `relay_peers` to disambiguate by `cwd`.
+If two sessions share a slugged basename (both `~/Code/backend/api`), Relay suffixes `-2`, `-3`. Use `relay_peers` to disambiguate by `cwd` — or pin the identity with `RELAY_PEER_ID` (see below).
+
+### Fixed identity (v0.2)
+
+By default, sessions are named after the project's directory basename and may collect `-2` / `-3` suffixes if names collide. To pin a session to a stable name across restarts, export `RELAY_PEER_ID` before launching:
+
+```bash
+RELAY_PEER_ID=backend-api claude --dangerously-load-development-channels plugin:relay@claude-relay
+```
+
+The hub also evicts zombie peers automatically: when a name collision happens, the hub probes the existing socket with a 500ms ping; if it doesn't respond, the slot is freed and the new session takes over. Crashed sessions and orphan plugins no longer block their own re-registration.
+
+### Rooms (v0.2)
+
+Rooms let a subgroup talk without spamming everyone via `relay_broadcast`. They are IRC-style: created implicitly on first join, destroyed when the last member leaves, no permissions, no persistence.
+
+Try:
+
+- _"join the design room"_ → `relay_join({room: "design"})`
+- _"who's in the design room?"_ → `relay_rooms()`
+- _"tell the design room standup moved to 11"_ → `relay_room({room: "design", text: "..."})`
+
+Room messages arrive as `<channel>` notifications carrying `room`, `from`, `text`, and `msg_id` — but **no `ask_id`**. They are announcements, not questions: don't `relay_reply` to them. If you want a directed answer from one peer in the room, use `relay_ask` instead — `relay_room` is broadcast-style fire-and-forget.
+
+Limits (configurable in `src/hub/handlers.ts`): up to 50 rooms total, 20 members per room.
 
 ## Error codes
 

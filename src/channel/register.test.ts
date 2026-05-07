@@ -6,9 +6,13 @@ import { rawConnect, startCh, tmpSocket } from "./test-helpers";
 describe("channel register", () => {
     let sockPath: string;
     const closers: Array<() => Promise<void>> = [];
+    const originalRelayPeerId = process.env.RELAY_PEER_ID;
 
     beforeEach(() => {
         sockPath = tmpSocket();
+        // Ensure determinism: the channel should fall back to defaultName(cwd)
+        // for these tests, regardless of how the test runner was launched.
+        delete process.env.RELAY_PEER_ID;
     });
 
     afterEach(async () => {
@@ -17,6 +21,11 @@ describe("channel register", () => {
             try {
                 await c();
             } catch {}
+        }
+        if (originalRelayPeerId === undefined) {
+            delete process.env.RELAY_PEER_ID;
+        } else {
+            process.env.RELAY_PEER_ID = originalRelayPeerId;
         }
     });
 
@@ -30,6 +39,22 @@ describe("channel register", () => {
         const taken = defaultName(process.cwd());
 
         const squatter = await rawConnect(sockPath);
+        // Auto-respond to hub probe pings so the squatter is treated as a live peer
+        // (mirrors what a real channel does in routing.ts).
+        squatter.socket.on("data", (chunk: Buffer) => {
+            const lines = chunk
+                .toString("utf8")
+                .split("\n")
+                .filter((l) => l.length > 0);
+            for (const line of lines) {
+                try {
+                    const obj = JSON.parse(line) as { type?: string; req_id?: string };
+                    if (obj.type === "ping" && typeof obj.req_id === "string") {
+                        squatter.send({ type: "pong", req_id: obj.req_id });
+                    }
+                } catch {}
+            }
+        });
         squatter.send({
             type: "register",
             name: taken,

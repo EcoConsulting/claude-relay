@@ -7,10 +7,14 @@ import { ClientMsgSchema, type ServerMsg } from "../protocol";
 import {
     handleAsk,
     handleBroadcast,
+    handleJoinRoom,
+    handleLeaveRoom,
     handleListPeers,
+    handleListRooms,
     handleRegister,
     handleRename,
     handleReply,
+    handleRoomMsg,
     type HubContext,
 } from "./handlers";
 import { createPendingAsks, type PendingAsk } from "./pending-asks";
@@ -27,6 +31,17 @@ export type StartHubOptions = {
     pendingAsks?: Map<string, PendingAsk>;
     idleExitMs?: number;
     onIdleExit?: () => void;
+    /**
+     * Interval in ms for the proactive sweep that probes all registered peers
+     * and evicts the ones that don't respond. Catches orphan plugins whose
+     * Claude Code parent died but whose socket is still up.
+     * Set to 0 to disable. Default: 30000.
+     */
+    sweepIntervalMs?: number;
+    /**
+     * Timeout in ms for each probe during the sweep. Default: 1000.
+     */
+    sweepProbeTimeoutMs?: number;
 };
 
 export type HubHandle = { close: () => Promise<void> };
@@ -117,6 +132,16 @@ export async function startHub(opts: StartHubOptions): Promise<HubHandle> {
                 return handleReply(ctx, socket, msg, send);
             case "broadcast":
                 return handleBroadcast(ctx, socket, msg, send);
+            case "join_room":
+                return handleJoinRoom(ctx, socket, msg, send);
+            case "leave_room":
+                return handleLeaveRoom(ctx, socket, msg, send);
+            case "room_msg":
+                return handleRoomMsg(ctx, socket, msg, send);
+            case "list_rooms":
+                return handleListRooms(ctx, socket, msg, send);
+            case "pong":
+                return ctx.registry.handlePong(msg.req_id);
         }
     };
 
@@ -150,9 +175,44 @@ export async function startHub(opts: StartHubOptions): Promise<HubHandle> {
     log.info("listen_start", { socketPath });
     scheduleIdleTimerIfEmpty();
 
+    const sweepIntervalMs = opts.sweepIntervalMs ?? 30_000;
+    const sweepProbeTimeoutMs = opts.sweepProbeTimeoutMs ?? 1000;
+    let sweepTimer: ReturnType<typeof setInterval> | null = null;
+    if (sweepIntervalMs > 0) {
+        sweepTimer = setInterval(() => {
+            const sockets = [...registry.sockets()];
+            if (sockets.length === 0) return;
+            log.debug("sweep_start", { peer_count: sockets.length });
+            void Promise.all(
+                sockets.map(async (s) => {
+                    const name = registry.getName(s);
+                    if (!name) return false;
+                    const alive = await registry.probeAlive(s, sweepProbeTimeoutMs);
+                    if (alive) return false;
+                    log.info("sweep_evicted", { name, reason: "probe_timeout" });
+                    // Destroying the socket fires socket.on("close") which already
+                    // does the full cleanup (removeBySocket + pendingAsks + peerGone
+                    // notifications). Reuse that path instead of duplicating logic.
+                    try {
+                        s.destroy();
+                    } catch {}
+                    return true;
+                }),
+            ).then((results) => {
+                const evicted = results.filter((r) => r === true).length;
+                if (evicted > 0) log.info("sweep_done", { evicted });
+            });
+        }, sweepIntervalMs);
+        sweepTimer.unref?.();
+    }
+
     return {
         close: () =>
             new Promise<void>((resolve) => {
+                if (sweepTimer !== null) {
+                    clearInterval(sweepTimer);
+                    sweepTimer = null;
+                }
                 cancelIdleTimer();
                 pendingAsks.clearAll();
                 server.close(() => {

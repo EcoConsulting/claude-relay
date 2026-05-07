@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { claudeSessionName, claudeSessionPath, defaultName, sanitizeSessionName } from "./identity";
+import {
+    claudeSessionName,
+    claudeSessionPath,
+    defaultName,
+    hasFixedRelayPeerIdentity,
+    resolveSessionName,
+    sanitizeSessionName,
+} from "./identity";
 
 describe("defaultName", () => {
     test("extracts lowercase basename from typical path", () => {
@@ -186,5 +193,89 @@ describe("claudeSessionPath", () => {
         expect(resolved).toBe(
             path.join(os.homedir(), ".claude", "sessions", `${process.ppid}.json`),
         );
+    });
+});
+
+describe("hasFixedRelayPeerIdentity", () => {
+    const original = process.env.RELAY_PEER_ID;
+
+    afterEach(() => {
+        if (original === undefined) delete process.env.RELAY_PEER_ID;
+        else process.env.RELAY_PEER_ID = original;
+    });
+
+    test("returns true when RELAY_PEER_ID is set and valid", () => {
+        process.env.RELAY_PEER_ID = "Hilo";
+        expect(hasFixedRelayPeerIdentity()).toBe(true);
+    });
+
+    test("returns false when RELAY_PEER_ID is unset", () => {
+        delete process.env.RELAY_PEER_ID;
+        expect(hasFixedRelayPeerIdentity()).toBe(false);
+    });
+
+    test("returns false when RELAY_PEER_ID is empty", () => {
+        process.env.RELAY_PEER_ID = "";
+        expect(hasFixedRelayPeerIdentity()).toBe(false);
+    });
+
+    test("returns false when RELAY_PEER_ID has disallowed characters", () => {
+        process.env.RELAY_PEER_ID = "evil name!!";
+        expect(hasFixedRelayPeerIdentity()).toBe(false);
+    });
+
+    test("returns false when RELAY_PEER_ID exceeds 64 chars", () => {
+        process.env.RELAY_PEER_ID = "a".repeat(65);
+        expect(hasFixedRelayPeerIdentity()).toBe(false);
+    });
+});
+
+describe("resolveSessionName", () => {
+    const original = process.env.RELAY_PEER_ID;
+
+    afterEach(() => {
+        if (original === undefined) delete process.env.RELAY_PEER_ID;
+        else process.env.RELAY_PEER_ID = original;
+    });
+
+    test("uses RELAY_PEER_ID when set and valid", () => {
+        process.env.RELAY_PEER_ID = "Hilo";
+        expect(resolveSessionName("/some/path")).toBe("Hilo");
+    });
+
+    test("trims surrounding whitespace from RELAY_PEER_ID", () => {
+        process.env.RELAY_PEER_ID = "  Hilo  ";
+        expect(resolveSessionName("/some/path")).toBe("Hilo");
+    });
+
+    test("ignores empty RELAY_PEER_ID and falls back to a non-empty name", () => {
+        process.env.RELAY_PEER_ID = "";
+        const result = resolveSessionName("/tmp/some-dir");
+        expect(result).not.toBe("");
+        expect(typeof result).toBe("string");
+        expect(result.length).toBeGreaterThan(0);
+    });
+
+    test("ignores RELAY_PEER_ID with disallowed characters and falls back", () => {
+        process.env.RELAY_PEER_ID = "a b c!!";
+        const result = resolveSessionName("/tmp/some-dir");
+        expect(result).not.toBe("a b c!!");
+        expect(typeof result).toBe("string");
+        expect(result.length).toBeGreaterThan(0);
+    });
+
+    test("ignores RELAY_PEER_ID exceeding length cap and falls back", () => {
+        const tooLong = "a".repeat(65);
+        process.env.RELAY_PEER_ID = tooLong;
+        const result = resolveSessionName("/tmp/some-dir");
+        expect(result).not.toBe(tooLong);
+        expect(result.length).toBeLessThanOrEqual(64);
+    });
+
+    test("falls back to a non-empty string when RELAY_PEER_ID is unset", () => {
+        delete process.env.RELAY_PEER_ID;
+        const result = resolveSessionName("/tmp/test-dir");
+        expect(typeof result).toBe("string");
+        expect(result.length).toBeGreaterThan(0);
     });
 });

@@ -11,7 +11,7 @@ const inProcessSpawner: NonNullable<StartChannelOptions["hubSpawner"]> = (p) =>
 export type ChannelH = Awaited<ReturnType<typeof startChannel>>;
 
 export const startCh = (opts: StartChannelOptions = {}): Promise<ChannelH> =>
-    startChannel({ hubSpawner: inProcessSpawner, ...opts });
+    startChannel({ hubSpawner: inProcessSpawner, parentWatchIntervalMs: 0, ...opts });
 
 export function tmpSocket(): string {
     return sharedTmpSocket("relay-chan-test-");

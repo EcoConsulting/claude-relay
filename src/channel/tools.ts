@@ -113,6 +113,59 @@ export async function relayBroadcast(
     return broadcastResultToTool(await pending);
 }
 
+export async function relayJoin(
+    ctx: ChannelContext,
+    args: Record<string, unknown>,
+): Promise<ToolResult> {
+    const room = args.room;
+    if (typeof room !== "string") return errResult("bad_args");
+    const reply = await ctx.getHub().sendRequest({ type: "join_room", room }, ctx.requestTimeoutMs);
+    if (reply.type === "room_ack") {
+        return okResult({ ok: true, room: reply.room, members: reply.members });
+    }
+    if (reply.type === "err") return errResult(reply.code);
+    return errResult("unexpected");
+}
+
+export async function relayLeave(
+    ctx: ChannelContext,
+    args: Record<string, unknown>,
+): Promise<ToolResult> {
+    const room = args.room;
+    if (typeof room !== "string") return errResult("bad_args");
+    const reply = await ctx
+        .getHub()
+        .sendRequest({ type: "leave_room", room }, ctx.requestTimeoutMs);
+    if (reply.type === "ack") return okResult({ ok: true });
+    if (reply.type === "err") return errResult(reply.code);
+    return errResult("unexpected");
+}
+
+export async function relayRoomMsg(
+    ctx: ChannelContext,
+    args: Record<string, unknown>,
+): Promise<ToolResult> {
+    const room = args.room;
+    const text = args.text;
+    if (typeof room !== "string" || typeof text !== "string") return errResult("bad_args");
+    const msgId = crypto.randomUUID();
+    const reply = await ctx
+        .getHub()
+        .sendRequest({ type: "room_msg", room, text, msg_id: msgId }, ctx.requestTimeoutMs);
+    if (reply.type === "room_send_ack") {
+        return okResult({ ok: true, room: reply.room, delivered_count: reply.delivered_count });
+    }
+    if (reply.type === "err") return errResult(reply.code);
+    return errResult("unexpected");
+}
+
+export async function relayListRooms(ctx: ChannelContext): Promise<ToolResult> {
+    const reply = await ctx.getHub().sendRequest({ type: "list_rooms" }, ctx.requestTimeoutMs);
+    if (reply.type === "rooms_list") return okResult({ rooms: reply.rooms });
+    if (reply.type === "err") return errResult(reply.code);
+    return errResult("unexpected");
+}
+
 export async function callTool(
     ctx: ChannelContext,
     name: string,
@@ -129,6 +182,14 @@ export async function callTool(
             return relayReply(ctx, args);
         case "relay_broadcast":
             return relayBroadcast(ctx, args);
+        case "relay_join":
+            return relayJoin(ctx, args);
+        case "relay_leave":
+            return relayLeave(ctx, args);
+        case "relay_room":
+            return relayRoomMsg(ctx, args);
+        case "relay_rooms":
+            return relayListRooms(ctx);
         default:
             return { isError: true, content: [{ type: "text", text: "not_implemented" }] };
     }

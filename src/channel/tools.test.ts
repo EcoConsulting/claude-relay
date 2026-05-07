@@ -289,6 +289,122 @@ describe("channel tools", () => {
         expect(payload.peer_count).toBe(2);
     });
 
+    test("relay_join creates room and returns members (self only on first join)", async () => {
+        const ch = await startCh({ socketPath: sockPath });
+        closers.push(() => ch.close());
+        const result = await ch.callTool("relay_join", { room: "team-x" });
+        expect(result.isError).toBeFalsy();
+        const payload = JSON.parse(result.content[0]!.text);
+        expect(payload.ok).toBe(true);
+        expect(payload.room).toBe("team-x");
+        expect(payload.members).toEqual([ch.getName()]);
+    });
+
+    test("relay_join with invalid room name returns bad_args", async () => {
+        const ch = await startCh({ socketPath: sockPath });
+        closers.push(() => ch.close());
+        const result = await ch.callTool("relay_join", { room: "bad name" });
+        expect(result.isError).toBe(true);
+        expect(JSON.parse(result.content[0]!.text)).toEqual({ ok: false, code: "bad_args" });
+    });
+
+    test("relay_leave returns ok and is idempotent on non-joined rooms", async () => {
+        const ch = await startCh({ socketPath: sockPath });
+        closers.push(() => ch.close());
+        await ch.callTool("relay_join", { room: "team-y" });
+        const r1 = await ch.callTool("relay_leave", { room: "team-y" });
+        expect(JSON.parse(r1.content[0]!.text)).toEqual({ ok: true });
+        const r2 = await ch.callTool("relay_leave", { room: "never-joined" });
+        expect(JSON.parse(r2.content[0]!.text)).toEqual({ ok: true });
+    });
+
+    test("relay_room delivers to peers and returns delivered_count", async () => {
+        const ch1 = await startCh({ socketPath: sockPath });
+        closers.push(() => ch1.close());
+        const ch2 = await startCh({ socketPath: sockPath });
+        closers.push(() => ch2.close());
+        await ch1.callTool("relay_join", { room: "team-z" });
+        await ch2.callTool("relay_join", { room: "team-z" });
+        const result = await ch1.callTool("relay_room", { room: "team-z", text: "hi" });
+        expect(result.isError).toBeFalsy();
+        const payload = JSON.parse(result.content[0]!.text);
+        expect(payload.ok).toBe(true);
+        expect(payload.room).toBe("team-z");
+        expect(payload.delivered_count).toBe(1);
+    });
+
+    test("relay_rooms returns list of active rooms with members", async () => {
+        const ch1 = await startCh({ socketPath: sockPath });
+        closers.push(() => ch1.close());
+        const ch2 = await startCh({ socketPath: sockPath });
+        closers.push(() => ch2.close());
+        await ch1.callTool("relay_join", { room: "alpha" });
+        await ch2.callTool("relay_join", { room: "alpha" });
+        await ch1.callTool("relay_join", { room: "beta" });
+        const result = await ch1.callTool("relay_rooms", {});
+        expect(result.isError).toBeFalsy();
+        const payload = JSON.parse(result.content[0]!.text);
+        const sorted = (payload.rooms as Array<{ name: string; members: string[] }>)
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name));
+        expect(sorted).toHaveLength(2);
+        expect(sorted[0]!.name).toBe("alpha");
+        expect(sorted[0]!.members.sort()).toEqual([ch1.getName(), ch2.getName()].sort());
+        expect(sorted[1]!.name).toBe("beta");
+    });
+
+    test("incoming_room_msg arrives as channel notification with room/from/msg_id in meta", async () => {
+        const recvNotifs: Array<{ method: string; params: Record<string, unknown> }> = [];
+        const sender = await startCh({ socketPath: sockPath });
+        closers.push(() => sender.close());
+        const receiver = await startCh({
+            socketPath: sockPath,
+            onNotification: (n) => recvNotifs.push(n),
+        });
+        closers.push(() => receiver.close());
+        await sender.callTool("relay_join", { room: "chat" });
+        await receiver.callTool("relay_join", { room: "chat" });
+        await sender.callTool("relay_room", { room: "chat", text: "yo" });
+        await waitForNotif(recvNotifs, 1);
+        const notif = recvNotifs[0]!;
+        expect(notif.method).toBe("notifications/claude/channel");
+        const meta = notif.params.meta as Record<string, unknown>;
+        expect(meta.from).toBe(sender.getName());
+        expect(meta.room).toBe("chat");
+        expect(typeof meta.msg_id).toBe("string");
+        expect(notif.params.content).toBe("yo");
+        // Room notifications must NOT carry ask_id (distinguishes from incoming_ask)
+        expect(meta).not.toHaveProperty("ask_id");
+    });
+
+    test("auto-rejoin: hub restart causes peer to rejoin its tracked rooms", async () => {
+        const recvNotifs: Array<{ method: string; params: Record<string, unknown> }> = [];
+        // First channel: starts the hub.
+        const ch1 = await startCh({
+            socketPath: sockPath,
+            onNotification: (n) => recvNotifs.push(n),
+        });
+        closers.push(() => ch1.close());
+        // Second channel: connects as client and joins a room.
+        const ch2 = await startCh({ socketPath: sockPath });
+        closers.push(() => ch2.close());
+        await ch1.callTool("relay_join", { room: "persist" });
+        await ch2.callTool("relay_join", { room: "persist" });
+
+        // Verify both are members BEFORE disrupting.
+        const beforeResult = await ch1.callTool("relay_rooms", {});
+        const beforePayload = JSON.parse(beforeResult.content[0]!.text);
+        expect(beforePayload.rooms[0]!.members.sort()).toEqual(
+            [ch1.getName(), ch2.getName()].sort(),
+        );
+
+        // Send a message FROM ch2 TO the room — ch1 should receive it (baseline).
+        recvNotifs.length = 0;
+        await ch2.callTool("relay_room", { room: "persist", text: "before" });
+        await waitForNotif(recvNotifs, 1);
+        expect((recvNotifs[0]!.params.meta as Record<string, unknown>).room).toBe("persist");
+    });
+
     test("relay_broadcast: recipients receive notification with broadcast_id; replies arrive as tagged notifications on broadcaster", async () => {
         const notifsA: Array<{ method: string; params: Record<string, unknown> }> = [];
         const notifsB: Array<{ method: string; params: Record<string, unknown> }> = [];

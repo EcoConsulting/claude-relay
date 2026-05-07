@@ -8,12 +8,22 @@ import {
     ErrMsg,
     IncomingAskMsg,
     IncomingReplyMsg,
+    IncomingRoomMsgMsg,
+    JoinRoomMsg,
+    LeaveRoomMsg,
     ListPeersMsg,
+    ListRoomsMsg,
     PeersMsg,
+    PingMsg,
+    PongMsg,
     PROTOCOL_VERSION,
     RegisterMsg,
     RenameMsg,
     ReplyMsg,
+    RoomAckMsg,
+    RoomMsgMsg,
+    RoomSendAckMsg,
+    RoomsListMsg,
     ServerMsgSchema,
 } from "./protocol";
 
@@ -46,8 +56,8 @@ describe("protocol client messages", () => {
         expect(PROTOCOL_VERSION.length).toBeGreaterThan(0);
     });
 
-    test("PROTOCOL_VERSION is '2'", () => {
-        expect(PROTOCOL_VERSION).toBe("2");
+    test("PROTOCOL_VERSION is '3'", () => {
+        expect(PROTOCOL_VERSION).toBe("3");
     });
 
     test("ErrCodeSchema accepts protocol_mismatch", () => {
@@ -124,6 +134,52 @@ describe("protocol client messages", () => {
     test("rejects unknown type", () => {
         expect(() => ClientMsgSchema.parse({ type: "nope" })).toThrow();
     });
+
+    test("pong round-trips and is in ClientMsgSchema", () => {
+        const m = { type: "pong" as const, req_id: "p1" };
+        expect(PongMsg.parse(m)).toEqual(m);
+        expect(ClientMsgSchema.parse(m)).toEqual(m);
+    });
+
+    test("pong rejects payload without req_id", () => {
+        expect(() => PongMsg.parse({ type: "pong" })).toThrow();
+    });
+
+    test("join_room round-trips with optional req_id", () => {
+        const m1 = { type: "join_room" as const, room: "diseno" };
+        expect(JoinRoomMsg.parse(m1)).toEqual(m1);
+        expect(ClientMsgSchema.parse(m1)).toEqual(m1);
+        const m2 = { type: "join_room" as const, room: "diseno", req_id: "r1" };
+        expect(JoinRoomMsg.parse(m2)).toEqual(m2);
+        expect(ClientMsgSchema.parse(m2)).toEqual(m2);
+    });
+
+    test("leave_room round-trips with optional req_id", () => {
+        const m = { type: "leave_room" as const, room: "diseno", req_id: "r2" };
+        expect(LeaveRoomMsg.parse(m)).toEqual(m);
+        expect(ClientMsgSchema.parse(m)).toEqual(m);
+    });
+
+    test("room_msg round-trips with msg_id and optional req_id", () => {
+        const m1 = {
+            type: "room_msg" as const,
+            room: "diseno",
+            text: "hola",
+            msg_id: "m1",
+        };
+        expect(RoomMsgMsg.parse(m1)).toEqual(m1);
+        expect(ClientMsgSchema.parse(m1)).toEqual(m1);
+        const m2 = { ...m1, req_id: "r3" };
+        expect(RoomMsgMsg.parse(m2)).toEqual(m2);
+    });
+
+    test("list_rooms round-trips with optional req_id", () => {
+        const m = { type: "list_rooms" as const };
+        expect(ListRoomsMsg.parse(m)).toEqual(m);
+        expect(ClientMsgSchema.parse(m)).toEqual(m);
+        const m2 = { type: "list_rooms" as const, req_id: "r4" };
+        expect(ListRoomsMsg.parse(m2)).toEqual(m2);
+    });
 });
 
 describe("protocol server messages", () => {
@@ -161,6 +217,71 @@ describe("protocol server messages", () => {
             broadcast_id: "b1",
         };
         expect(IncomingReplyMsg.parse(m)).toEqual(m);
+    });
+
+    test("ping round-trips and is in ServerMsgSchema", () => {
+        const m = { type: "ping" as const, req_id: "p1" };
+        expect(PingMsg.parse(m)).toEqual(m);
+        expect(ServerMsgSchema.parse(m)).toEqual(m);
+    });
+
+    test("ping rejects payload without req_id", () => {
+        expect(() => PingMsg.parse({ type: "ping" })).toThrow();
+    });
+
+    test("room_ack round-trips with members", () => {
+        const m = {
+            type: "room_ack" as const,
+            room: "diseno",
+            members: ["alice", "bob"],
+        };
+        expect(RoomAckMsg.parse(m)).toEqual(m);
+        expect(ServerMsgSchema.parse(m)).toEqual(m);
+        const m2 = { ...m, req_id: "r1" };
+        expect(RoomAckMsg.parse(m2)).toEqual(m2);
+    });
+
+    test("room_send_ack round-trips with delivered_count", () => {
+        const m = {
+            type: "room_send_ack" as const,
+            room: "diseno",
+            delivered_count: 3,
+        };
+        expect(RoomSendAckMsg.parse(m)).toEqual(m);
+        expect(ServerMsgSchema.parse(m)).toEqual(m);
+    });
+
+    test("incoming_room_msg round-trips with from/text/msg_id", () => {
+        const m = {
+            type: "incoming_room_msg" as const,
+            room: "diseno",
+            from: "alice",
+            text: "hola",
+            msg_id: "m1",
+        };
+        expect(IncomingRoomMsgMsg.parse(m)).toEqual(m);
+        expect(ServerMsgSchema.parse(m)).toEqual(m);
+    });
+
+    test("rooms_list round-trips with rooms array", () => {
+        const m = {
+            type: "rooms_list" as const,
+            rooms: [
+                { name: "a", members: ["x"] },
+                { name: "b", members: ["y", "z"] },
+            ],
+        };
+        expect(RoomsListMsg.parse(m)).toEqual(m);
+        expect(ServerMsgSchema.parse(m)).toEqual(m);
+    });
+
+    test("room_ack and room_send_ack are distinct types in ServerMsgSchema (no collision)", () => {
+        const ack = { type: "room_ack" as const, room: "x", members: ["a"] };
+        const sendAck = { type: "room_send_ack" as const, room: "x", delivered_count: 1 };
+        const parsedAck = ServerMsgSchema.parse(ack);
+        const parsedSendAck = ServerMsgSchema.parse(sendAck);
+        expect(parsedAck.type).toBe("room_ack");
+        expect(parsedSendAck.type).toBe("room_send_ack");
     });
 
     test("ask/incoming_ask/incoming_reply accept optional thread_id; reply does not carry one", () => {

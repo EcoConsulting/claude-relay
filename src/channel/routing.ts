@@ -5,6 +5,7 @@ import {
     buildAskErrorNotification,
     buildAskNotification,
     buildReplyNotification,
+    buildRoomMsgNotification,
     type ChannelNotification,
 } from "./notifications";
 import type { PendingBroadcasts } from "./pending-broadcasts";
@@ -57,8 +58,16 @@ export function wireHubRouting(
             emitNotification(buildReplyNotification(m));
             return;
         }
+        if (m.type === "incoming_room_msg") {
+            emitNotification(buildRoomMsgNotification(m));
+            return;
+        }
         if (m.type === "err" && m.ask_id) {
             emitNotification(buildAskErrorNotification(m.ask_id, m.code));
+            return;
+        }
+        if (m.type === "ping") {
+            hub.send({ type: "pong", req_id: m.req_id });
         }
     });
 

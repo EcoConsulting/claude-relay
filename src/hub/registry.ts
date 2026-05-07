@@ -1,4 +1,5 @@
 import type * as net from "node:net";
+import { writeLine } from "../framing";
 import { makeLogger } from "../logger";
 import type { PeerRecord } from "../protocol";
 
@@ -26,16 +27,80 @@ export function createPeerRegistry() {
     const peers = new Map<string, PeerEntry>();
     const nameToSocket = new Map<string, net.Socket>();
     const socketToName = new Map<net.Socket, string>();
+    const pendingProbes = new Map<string, (alive: boolean) => void>();
+    const registerInProgress = new Set<string>();
+    const rooms = new Map<string, Set<string>>();
+    let probeIdCounter = 0;
 
-    function register(socket: net.Socket, msg: RegisterInput): RegisterResult {
+    function probeAlive(socket: net.Socket, timeoutMs: number): Promise<boolean> {
+        return new Promise<boolean>((resolve) => {
+            probeIdCounter += 1;
+            const reqId = `probe-${probeIdCounter}-${Date.now()}`;
+            const timer = setTimeout(() => {
+                if (pendingProbes.delete(reqId)) {
+                    log.debug("probe_timeout", { req_id: reqId });
+                    resolve(false);
+                }
+            }, timeoutMs);
+            pendingProbes.set(reqId, (alive: boolean) => {
+                clearTimeout(timer);
+                pendingProbes.delete(reqId);
+                resolve(alive);
+            });
+            try {
+                writeLine(socket, { type: "ping", req_id: reqId });
+            } catch {
+                const resolver = pendingProbes.get(reqId);
+                if (resolver) {
+                    clearTimeout(timer);
+                    pendingProbes.delete(reqId);
+                    resolve(false);
+                }
+            }
+        });
+    }
+
+    function handlePong(reqId: string): void {
+        const resolver = pendingProbes.get(reqId);
+        if (resolver) resolver(true);
+    }
+
+    async function register(socket: net.Socket, msg: RegisterInput): Promise<RegisterResult> {
         if (socketToName.has(socket)) {
             log.warn("peer_register_err", { code: "already_registered", attempted_name: msg.name });
             return "already_registered";
         }
         const existing = nameToSocket.get(msg.name);
         if (existing && existing !== socket) {
-            log.warn("peer_register_err", { code: "name_taken", attempted_name: msg.name });
-            return "name_taken";
+            if (existing.destroyed || !existing.writable) {
+                log.info("zombie_evicted", { name: msg.name, reason: "flags" });
+                removeBySocket(existing);
+            } else {
+                if (registerInProgress.has(msg.name)) {
+                    log.warn("peer_register_err", {
+                        code: "name_taken",
+                        attempted_name: msg.name,
+                        reason: "register_in_progress",
+                    });
+                    return "name_taken";
+                }
+                registerInProgress.add(msg.name);
+                try {
+                    const alive = await probeAlive(existing, 500);
+                    if (alive) {
+                        log.warn("peer_register_err", {
+                            code: "name_taken",
+                            attempted_name: msg.name,
+                            reason: "probe_alive",
+                        });
+                        return "name_taken";
+                    }
+                    log.info("zombie_evicted", { name: msg.name, reason: "probe_timeout" });
+                    removeBySocket(existing);
+                } finally {
+                    registerInProgress.delete(msg.name);
+                }
+            }
         }
         peers.set(msg.name, {
             name: msg.name,
@@ -72,6 +137,12 @@ export function createPeerRegistry() {
         nameToSocket.delete(current);
         nameToSocket.set(newName, socket);
         socketToName.set(socket, newName);
+        for (const members of rooms.values()) {
+            if (members.has(current)) {
+                members.delete(current);
+                members.add(newName);
+            }
+        }
         log.info("peer_rename", { from: current, to: newName });
         return "ok";
     }
@@ -88,6 +159,11 @@ export function createPeerRegistry() {
         const name = socketToName.get(socket);
         if (!name) return undefined;
         log.info("peer_disconnect", { name });
+        for (const [roomName, members] of rooms) {
+            if (members.delete(name) && members.size === 0) {
+                rooms.delete(roomName);
+            }
+        }
         socketToName.delete(socket);
         if (nameToSocket.get(name) === socket) {
             nameToSocket.delete(name);
@@ -110,17 +186,54 @@ export function createPeerRegistry() {
         return out;
     }
 
+    function joinRoom(peerName: string, room: string): string[] {
+        let members = rooms.get(room);
+        if (!members) {
+            members = new Set();
+            rooms.set(room, members);
+        }
+        members.add(peerName);
+        return [...members];
+    }
+
+    function leaveRoom(peerName: string, room: string): boolean {
+        const members = rooms.get(room);
+        if (!members) return false;
+        const removed = members.delete(peerName);
+        if (members.size === 0) {
+            rooms.delete(room);
+        }
+        return removed;
+    }
+
+    function listRooms(): Array<{ name: string; members: string[] }> {
+        return [...rooms.entries()].map(([name, members]) => ({
+            name,
+            members: [...members],
+        }));
+    }
+
+    function getRoomMembers(room: string): string[] {
+        return [...(rooms.get(room) ?? [])];
+    }
+
     return {
         register,
         rename,
         touch,
         removeBySocket,
         list,
+        probeAlive,
+        handlePong,
         getSocket: (name: string) => nameToSocket.get(name),
         getName: (socket: net.Socket) => socketToName.get(socket),
         hasName: (name: string) => nameToSocket.has(name),
         isEmpty: () => peers.size === 0 && nameToSocket.size === 0,
         names: () => nameToSocket.keys(),
         sockets: () => socketToName.keys(),
+        joinRoom,
+        leaveRoom,
+        listRooms,
+        getRoomMembers,
     };
 }

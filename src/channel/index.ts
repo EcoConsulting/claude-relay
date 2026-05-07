@@ -1,7 +1,13 @@
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { execFileSync } from "node:child_process";
-import { claudeSessionName, claudeSessionPath, defaultName } from "../identity";
+import {
+    claudeSessionName,
+    claudeSessionPath,
+    hasFixedRelayPeerIdentity,
+    resolveSessionName,
+    sanitizeSessionName,
+} from "../identity";
 import { makeLogger } from "../logger";
 import { HUB_SOCKET_PATH, type ServerMsg } from "../protocol";
 import { bootstrapHub, type HubRole } from "./bootstrap";
@@ -22,11 +28,13 @@ import {
 const log = makeLogger("channel");
 
 const INSTRUCTIONS = [
-    "If an incoming `<channel>` message is present, you MUST reply via relay_reply(ask_id, text) BEFORE handling any other user work. The peer session is blocked waiting on your reply. Exception: if the pending user work is destructive or irreversible, complete or confirm that first, then reply.",
+    "If an incoming `<channel>` message carries an `ask_id` in its meta, you MUST reply via relay_reply(ask_id, text) BEFORE handling any other user work. The peer session is blocked waiting on your reply. Exception: if the pending user work is destructive or irreversible, complete or confirm that first, then reply.",
     "When an incoming reply to one of your asks contains a question directed back at you, surface that question to the user and offer to follow up with a new relay_ask(); do not end your turn without relaying the question-back.",
     "Pick the target with relay_peers() (match by name/cwd/branch); use relay_ask for one peer, relay_broadcast for all.",
     'If the user refers to a peer by pronoun or demonstrative ("them", "that session", "it"), carry forward the most recent `to:` value. If ambiguous across multiple peers, call relay_peers and confirm with the user before sending.',
     "Trust tool defaults. Only override an argument when the user gave an explicit value for that exact argument; descriptive words about the answer never change tool arguments.",
+    "For multi-peer coordination, use rooms (relay_join, relay_room, relay_leave, relay_rooms). Rooms are ephemeral IRC-style: implicit creation on first join, implicit destruction on last leave, no permissions (any peer can post to any room, with or without membership). Prefer relay_ask for one-to-one exchanges and relay_room for broadcast-to-subgroup; relay_room is fire-and-forget, NOT request/response — use relay_ask if you need a directed reply.",
+    "Incoming room messages arrive as `<channel>` notifications with `room`, `from`, `text`, and `msg_id` in meta and NO `ask_id`. They are announcements, NOT questions: do NOT call relay_reply on them. If the message in the room invites follow-up, decide between relay_ask (directed reply, blocks the asker) and relay_room (visible to the whole room) based on whether the answer concerns one peer or the group.",
 ].join(" ");
 
 const CAPABILITIES = {
@@ -55,6 +63,13 @@ export type StartChannelOptions = {
     requestTimeoutMs?: number;
     broadcastTimeoutMs?: number;
     skipRegister?: boolean;
+    /**
+     * Interval in ms for checking whether the parent process is still alive.
+     * When the parent dies (e.g. the Claude Code session window is closed),
+     * the channel auto-shuts down to avoid lingering as an orphan process.
+     * Set to 0 to disable (useful for tests). Default: 2000.
+     */
+    parentWatchIntervalMs?: number;
 };
 
 export type ChannelHandle = {
@@ -79,7 +94,8 @@ export async function startChannel(opts: StartChannelOptions = {}): Promise<Chan
             if (
                 m.type === "incoming_ask" ||
                 m.type === "incoming_reply" ||
-                m.type === "broadcast_ack"
+                m.type === "broadcast_ack" ||
+                m.type === "incoming_room_msg"
             ) {
                 onIncoming(m);
             }
@@ -88,8 +104,7 @@ export async function startChannel(opts: StartChannelOptions = {}): Promise<Chan
     wireIncoming(bootstrap.hub);
 
     const gitBranch = detectGitBranch();
-    const onDiskName = claudeSessionName();
-    const candidate = onDiskName ?? defaultName(process.cwd());
+    const candidate = resolveSessionName(process.cwd());
     let name = opts.skipRegister
         ? candidate
         : await registerWithRetries(
@@ -108,6 +123,7 @@ export async function startChannel(opts: StartChannelOptions = {}): Promise<Chan
     });
 
     const pendingBroadcasts = createPendingBroadcasts();
+    const joinedRooms = new Set<string>();
     const nowFn = opts.now ?? Date.now;
 
     const { server, toolSchemas } = createMcpServer(
@@ -122,6 +138,7 @@ export async function startChannel(opts: StartChannelOptions = {}): Promise<Chan
     });
 
     let closed = false;
+    let parentWatcher: ReturnType<typeof setInterval> | null = null;
 
     const reconnector = createReconnector({
         socketPath,
@@ -139,6 +156,13 @@ export async function startChannel(opts: StartChannelOptions = {}): Promise<Chan
             wireIncoming(next.hub);
             wireHubRouting(next.hub, pendingBroadcasts, emitNotification);
             reconnector.wire(next.hub);
+            // Fire-and-forget rejoin. If a room hit MAX_MEMBERS_PER_ROOM while we were
+            // disconnected, the hub will reply with err bad_args and that reply is lost
+            // here — joinedRooms drifts from hub state silently. Symptom: relay_room
+            // returns delivered_count:0 without error. Fix in v3 with sendRequest+cleanup.
+            for (const room of joinedRooms) {
+                next.hub.send({ type: "join_room", room });
+            }
             prev.hub.close();
             if (prev.hubHandle) {
                 void prev.hubHandle.close().catch((e: unknown) => {
@@ -169,31 +193,49 @@ export async function startChannel(opts: StartChannelOptions = {}): Promise<Chan
         requestTimeoutMs,
     };
 
-    const callTool = wireToolHandlers(server, toolSchemas, (toolName, args) =>
-        dispatchTool(ctx, toolName, args),
-    );
+    // Track joined rooms locally so we can auto-rejoin after a hub reconnect.
+    // We mirror the sanitized name (matching hub's storage key) instead of the raw
+    // user input, so the rejoin send uses the same key the hub indexed under.
+    const callTool = wireToolHandlers(server, toolSchemas, async (toolName, args) => {
+        const result = await dispatchTool(ctx, toolName, args);
+        if (!result.isError) {
+            if (toolName === "relay_join" && typeof args.room === "string") {
+                const sanitized = sanitizeSessionName(args.room);
+                if (sanitized !== null) joinedRooms.add(sanitized);
+            } else if (toolName === "relay_leave" && typeof args.room === "string") {
+                const sanitized = sanitizeSessionName(args.room);
+                if (sanitized !== null) joinedRooms.delete(sanitized);
+            }
+        }
+        return result;
+    });
 
-    const sessionWatcher = opts.skipRegister
-        ? null
-        : startSessionWatcher({
-              sessionPath: claudeSessionPath(),
-              initialName: onDiskName,
-              onName: async (newName) => {
-                  if (newName === name) return;
-                  const result = await renameWithHub(ctx, newName);
-                  if (!result.ok) {
-                      log.warn("session_watcher_rename_failed", {
-                          attempted: newName,
-                          code: result.code,
-                      });
-                  }
-              },
-          });
+    const sessionWatcher =
+        opts.skipRegister || hasFixedRelayPeerIdentity()
+            ? null
+            : startSessionWatcher({
+                  sessionPath: claudeSessionPath(),
+                  initialName: claudeSessionName(),
+                  onName: async (newName) => {
+                      if (newName === name) return;
+                      const result = await renameWithHub(ctx, newName);
+                      if (!result.ok) {
+                          log.warn("session_watcher_rename_failed", {
+                              attempted: newName,
+                              code: result.code,
+                          });
+                      }
+                  },
+              });
 
     const close = async (): Promise<void> => {
         if (closed) return;
         closed = true;
         log.info("channel_close");
+        if (parentWatcher !== null) {
+            clearInterval(parentWatcher);
+            parentWatcher = null;
+        }
         if (sessionWatcher !== null) sessionWatcher.close();
         reconnector.close();
         pendingBroadcasts.clear();
@@ -214,6 +256,36 @@ export async function startChannel(opts: StartChannelOptions = {}): Promise<Chan
             } catch {}
         }
     };
+
+    const parentWatchIntervalMs = opts.parentWatchIntervalMs ?? 2000;
+    if (parentWatchIntervalMs > 0 && process.ppid && process.ppid > 1) {
+        const bootPpid = process.ppid;
+        parentWatcher = setInterval(() => {
+            // Cross-platform parent-death detection:
+            // - Linux/Mac: when parent dies, child is re-parented to init/systemd → ppid changes.
+            // - Windows: no re-parenting; rely on stdin closure when parent's stdio handles drop.
+            // Combining all three signals catches the death across platforms.
+            const stdin = process.stdin as NodeJS.ReadStream & {
+                destroyed?: boolean;
+                readableEnded?: boolean;
+            };
+            const ppidChanged = process.ppid !== bootPpid;
+            const stdinDestroyed = stdin.destroyed === true;
+            const stdinEnded = stdin.readableEnded === true;
+            if (ppidChanged || stdinDestroyed || stdinEnded) {
+                log.info("parent_died", {
+                    bootPpid,
+                    currentPpid: process.ppid,
+                    ppidChanged,
+                    stdinDestroyed,
+                    stdinEnded,
+                });
+                void close();
+            }
+        }, parentWatchIntervalMs);
+        // Don't keep the event loop alive solely for this watcher.
+        parentWatcher.unref?.();
+    }
 
     // If the MCP transport closes (e.g. parent Claude Code died -> stdin EOF),
     // tear down the hub connection so the hub reaps this peer immediately.
