@@ -4,9 +4,27 @@ Let local Claude Code sessions talk to each other in natural language.
 
 Running two Claude sessions on different projects? In one, say _"ask the backend session if the auth token shape changed"_ and the other answers. Or _"ask everyone what they're working on"_ and replies stream back. Need a subgroup chat? Use rooms.
 
-> **This is an Eco Consulting internal fork (v0.2.0)** of [innestic/claude-relay](https://github.com/innestic/claude-relay). The public marketplace ships v0.1.0; this branch adds **fixed identity** (no more zombie suffixes on restart) and **ephemeral rooms** for subgroup coordination. See [CHANGELOG.md](CHANGELOG.md) for details. Not currently published to the marketplace.
+> **Eco Consulting fork — v0.2.0.** This is a fork of [innestic/claude-relay](https://github.com/innestic/claude-relay) maintained by [Eco Consulting](https://github.com/EcoConsulting). The upstream ships v0.1.0; this fork adds **fixed identity**, **ephemeral rooms**, and **zombie eviction**. Install instructions below point to this fork; full release notes in [CHANGELOG.md](CHANGELOG.md).
 
 <img width="1280" height="678" alt="ezgif-7f30f78a18c9905f" src="https://github.com/user-attachments/assets/9a132dfa-9db1-4550-96e0-cd25a2744fce" />
+
+## What's new in v0.2.0
+
+Two parallel features built on top of the upstream v0.1.0, validated with a runtime 3-peer scenario:
+
+**Block 1 — Fixed identity** (zombie eviction):
+- `RELAY_PEER_ID` env var pins a session to a stable name across restarts. No more `-2` / `-3` suffixes when you reopen a session that crashed.
+- The hub probes name collisions with a 500ms ping. If the existing peer doesn't respond, its slot is freed automatically.
+- Proactive 30-second sweep evicts non-responsive peers (orphan plugins whose Claude Code parent died but whose socket is still up).
+- Cross-platform parent-death detection on Windows.
+
+**Block 2 — Ephemeral rooms** (subgroup messaging):
+- Four new MCP tools: `relay_join`, `relay_leave`, `relay_room`, `relay_rooms`.
+- IRC-style lifecycle: rooms are created on first join, destroyed when the last member leaves. No permissions, no persistence.
+- Auto-rejoin on hub reconnect.
+- Talk to a subgroup of peers without spamming everyone via `relay_broadcast`.
+
+**Protocol**: `PROTOCOL_VERSION` bumped from `"2"` to `"3"`. Six new client→hub message types and four new hub→client message types. See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ## Install
 
@@ -17,7 +35,7 @@ Claude Relay ships as a Claude Code plugin. Three steps.
 From any Claude Code session:
 
 ```
-/plugin marketplace add innestic/claude-relay
+/plugin marketplace add EcoConsulting/claude-relay
 ```
 
 ### 2. Install the plugin
@@ -30,13 +48,11 @@ This registers the MCP server and slash commands.
 
 ### 3. Launch sessions with the channel capability
 
-Relay delivers inbound messages via `notifications/claude/channel` — a Claude Code capability still in research preview. Every session that should send or receive messages must be launched with:
+Relay delivers inbound messages via `notifications/claude/channel` — a Claude Code capability still in research preview. Because this fork isn't on Anthropic's official channel allowlist, every session that should send or receive messages must be launched with the development flag:
 
 ```bash
 claude --dangerously-load-development-channels plugin:relay@claude-relay
 ```
-
-The `dangerously-` prefix is required until Anthropic promotes the channels capability to general availability and adds this plugin to the trusted allowlist. We will submit for review and drop the flag as soon as it's approved.
 
 Open two sessions in different project dirs and try the examples below.
 
@@ -144,7 +160,7 @@ Details: [docs/architecture.md](docs/architecture.md).
 Requires [Bun](https://bun.sh) and Claude Code 2.1.80+.
 
 ```bash
-git clone https://github.com/innestic/claude-relay
+git clone https://github.com/EcoConsulting/claude-relay
 cd claude-relay && bun install
 bun run check   # typecheck + lint + format + test
 ```

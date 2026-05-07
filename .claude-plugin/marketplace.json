@@ -1,15 +1,15 @@
 {
     "name": "claude-relay",
     "owner": {
-        "name": "Innestic",
-        "url": "https://github.com/innestic"
+        "name": "Eco Consulting",
+        "url": "https://github.com/EcoConsulting"
     },
     "plugins": [
         {
             "name": "relay",
             "source": "./",
-            "description": "Let local Claude Code sessions talk to each other in natural language",
-            "version": "0.1.0"
+            "description": "Let local Claude Code sessions talk to each other in natural language — with fixed identity, ephemeral rooms, and zombie eviction",
+            "version": "0.2.0"
         }
     ]
 }
