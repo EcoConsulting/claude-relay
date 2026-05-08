@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { startCh, tmpSocket } from "./test-helpers";
 import { MAX_TEXT_LEN } from "../protocol";
+import { startCh, tmpSocket } from "./test-helpers";
 
 describe("channel tool schemas", () => {
     let sockPath: string;

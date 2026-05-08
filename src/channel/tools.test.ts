@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { MAX_TEXT_LEN, PROTOCOL_VERSION, type ServerMsg } from "../protocol";
 import type { HubConnection } from "./hub-connection";
 import { createPendingBroadcasts } from "./pending-broadcasts";
 import { rawConnect, startCh, tmpSocket, waitForNotif } from "./test-helpers";
-import { MAX_TEXT_LEN, PROTOCOL_VERSION, type ServerMsg } from "../protocol";
 import { relayAsk, relayBroadcast, relayReply, type ChannelContext } from "./tools";
 
 type RecordedSend = { type: "send"; payload: unknown };
