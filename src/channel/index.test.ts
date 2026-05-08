@@ -110,6 +110,15 @@ describe("channel lifecycle", () => {
         expect(instr).toContain("pronoun or demonstrative");
     });
 
+    test("instructions tell Claude to quote incoming channel bodies verbatim to the user", async () => {
+        const ch = await startCh({ socketPath: sockPath });
+        closers.push(() => ch.close());
+        const instr = ch.getInstructions();
+        expect(instr).toContain("verbatim");
+        expect(instr.toLowerCase()).toContain("quote");
+        expect(instr).toMatch(/<channel>/);
+    });
+
     test("instructions forbid relay_broadcast as a fallback when relay_ask fails", async () => {
         const ch = await startCh({ socketPath: sockPath });
         closers.push(() => ch.close());

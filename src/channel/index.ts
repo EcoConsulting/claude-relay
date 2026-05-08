@@ -23,6 +23,7 @@ const log = makeLogger("channel");
 
 const INSTRUCTIONS = [
     "If an incoming `<channel>` message is present, you MUST reply via relay_reply(ask_id, text) BEFORE handling any other user work. The peer session is blocked waiting on your reply. Exception: if the pending user work is destructive or irreversible, complete or confirm that first, then reply.",
+    "Whenever an incoming `<channel>` message arrives (ask, reply, or broadcast), your first user-visible output that turn must quote the peer's full body verbatim in a fenced markdown block, prefixed with the sender name and kind (e.g. `peer-name (ask):`). The Claude Code TUI truncates tool-result panels, so plain assistant text is the only place the user actually sees the message. Quote first, then act.",
     "When an incoming reply to one of your asks contains a question directed back at you, surface that question to the user and offer to follow up with a new relay_ask(); do not end your turn without relaying the question-back.",
     "Pick the target with relay_peers() (match by name/cwd/branch); use relay_ask for one peer, relay_broadcast for all.",
     "If a relay_ask fails (peer_not_found, peer_gone, timeout), surface the failure to the user and let them decide. Never broadcast as a fallback: relay_broadcast hits every session on the machine, including ones on unrelated projects, and is almost always the wrong recovery.",
@@ -155,7 +156,7 @@ export async function startChannel(opts: StartChannelOptions = {}): Promise<Chan
     reconnector.wire(bootstrap.hub);
 
     const requestTimeoutMs = opts.requestTimeoutMs ?? 30_000;
-    const broadcastTimeoutMs = opts.broadcastTimeoutMs ?? 125_000;
+    const broadcastTimeoutMs = opts.broadcastTimeoutMs ?? 300_000;
 
     const ctx: ChannelContext = {
         getHub: () => bootstrap.hub,

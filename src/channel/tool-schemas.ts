@@ -1,6 +1,9 @@
+import { MAX_TEXT_LEN } from "../protocol";
+
 export type JsonSchemaProperty = {
     type: string;
     description?: string;
+    maxLength?: number;
 };
 
 export type JsonSchemaObject = {
@@ -30,7 +33,7 @@ export const TOOLS: ToolSchema[] = [
             type: "object",
             properties: {
                 to: { type: "string" },
-                question: { type: "string" },
+                question: { type: "string", maxLength: MAX_TEXT_LEN },
                 thread_id: {
                     type: "string",
                     description:
@@ -48,7 +51,7 @@ export const TOOLS: ToolSchema[] = [
             type: "object",
             properties: {
                 ask_id: { type: "string" },
-                text: { type: "string" },
+                text: { type: "string", maxLength: MAX_TEXT_LEN },
             },
             required: ["ask_id", "text"],
         },
@@ -60,7 +63,7 @@ export const TOOLS: ToolSchema[] = [
         inputSchema: {
             type: "object",
             properties: {
-                question: { type: "string" },
+                question: { type: "string", maxLength: MAX_TEXT_LEN },
                 exclude_self: { type: "boolean" },
             },
             required: ["question"],

@@ -33,7 +33,7 @@ export type HubHandle = { close: () => Promise<void> };
 
 export async function startHub(opts: StartHubOptions): Promise<HubHandle> {
     const { socketPath } = opts;
-    const defaultAskTimeoutMs = opts.defaultAskTimeoutMs ?? 120_000;
+    const defaultAskTimeoutMs = opts.defaultAskTimeoutMs ?? 300_000;
     const idleExitMs = opts.idleExitMs ?? 5 * 60 * 1000;
     const onIdleExit = opts.onIdleExit ?? (() => process.exit(0));
 

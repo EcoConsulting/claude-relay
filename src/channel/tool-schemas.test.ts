@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { startCh, tmpSocket } from "./test-helpers";
+import { MAX_TEXT_LEN } from "../protocol";
 
 describe("channel tool schemas", () => {
     let sockPath: string;
@@ -91,6 +92,19 @@ describe("channel tool schemas", () => {
         const schemas = ch.getToolSchemas();
         const reply = schemas.find((s) => s.name === "relay_reply")!;
         expect(reply.description).toMatch(/one-shot|plain/);
+    });
+
+    test("relay_ask.question, relay_reply.text, relay_broadcast.question declare maxLength MAX_TEXT_LEN", async () => {
+        const ch = await startCh({ socketPath: sockPath });
+        closers.push(() => ch.close());
+        const schemas = ch.getToolSchemas();
+        const ask = schemas.find((s) => s.name === "relay_ask")!;
+        const reply = schemas.find((s) => s.name === "relay_reply")!;
+        const bcast = schemas.find((s) => s.name === "relay_broadcast")!;
+
+        expect(ask.inputSchema.properties.question!.maxLength).toBe(MAX_TEXT_LEN);
+        expect(reply.inputSchema.properties.text!.maxLength).toBe(MAX_TEXT_LEN);
+        expect(bcast.inputSchema.properties.question!.maxLength).toBe(MAX_TEXT_LEN);
     });
 
     test("relay_broadcast description warns against fallback usage and unrelated-project blast radius", async () => {

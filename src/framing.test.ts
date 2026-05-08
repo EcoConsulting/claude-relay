@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { readLines } from "./framing";
+import { MAX_LINE_LEN, readLines, writeLine } from "./framing";
 
 describe("framing", () => {
     let server: net.Server;
@@ -42,7 +42,7 @@ describe("framing", () => {
         const lines: string[] = [];
         const { client, server: srv } = await connectPair((line) => lines.push(line));
 
-        const payload = "B".repeat(64 * 1024 - 1);
+        const payload = "B".repeat(MAX_LINE_LEN - 1);
         client.write(payload + "\n");
 
         // Wait for the line to surface.
@@ -60,7 +60,58 @@ describe("framing", () => {
         client.destroy();
     });
 
-    test("destroys socket when line exceeds 64KB without newline", async () => {
+    test("delivers a 200KB line through the framing layer", async () => {
+        const lines: string[] = [];
+        const { client, server: srv } = await connectPair((line) => lines.push(line));
+
+        const payload = "X".repeat(200 * 1024);
+        client.write(payload + "\n");
+
+        await new Promise<void>((resolve) => {
+            const iv = setInterval(() => {
+                if (lines.length > 0) {
+                    clearInterval(iv);
+                    resolve();
+                }
+            }, 5);
+        });
+
+        expect(lines).toEqual([payload]);
+        expect(srv.destroyed).toBe(false);
+        client.destroy();
+    });
+
+    test("writeLine drops oversize outbound lines without writing", () => {
+        const writes: string[] = [];
+        const fakeSocket = {
+            write: (chunk: string) => {
+                writes.push(chunk);
+                return true;
+            },
+        } as unknown as net.Socket;
+
+        // Build an object whose JSON.stringify(...) + "\n" exceeds MAX_LINE_LEN.
+        const oversize = { type: "ask", question: "Q".repeat(MAX_LINE_LEN + 1) };
+        writeLine(fakeSocket, oversize);
+
+        expect(writes).toEqual([]);
+    });
+
+    test("writeLine writes lines at or under MAX_LINE_LEN", () => {
+        const writes: string[] = [];
+        const fakeSocket = {
+            write: (chunk: string) => {
+                writes.push(chunk);
+                return true;
+            },
+        } as unknown as net.Socket;
+
+        writeLine(fakeSocket, { type: "ack" });
+        expect(writes.length).toBe(1);
+        expect(writes[0]).toBe('{"type":"ack"}\n');
+    });
+
+    test("destroys socket when line exceeds MAX_LINE_LEN without newline", async () => {
         const lines: string[] = [];
         const { client, server: srv } = await connectPair((line) => lines.push(line));
 
@@ -68,9 +119,10 @@ describe("framing", () => {
             srv.on("close", () => resolve());
         });
 
-        // Send 1MB without a newline.
-        const chunk = Buffer.alloc(64 * 1024, 0x41); // "A"
-        for (let i = 0; i < 16; i++) {
+        const chunkSize = 64 * 1024;
+        const chunk = Buffer.alloc(chunkSize, 0x41);
+        const chunks = Math.ceil((MAX_LINE_LEN * 2) / chunkSize);
+        for (let i = 0; i < chunks; i++) {
             client.write(chunk);
         }
 

@@ -3,7 +3,7 @@ import { makeLogger } from "./logger";
 
 const log = makeLogger("framing");
 
-const MAX_LINE_LEN = 64 * 1024;
+export const MAX_LINE_LEN = 1024 * 1024;
 
 export function readLines(socket: net.Socket, onLine: (line: string) => void): void {
     let buffer = "";
@@ -25,5 +25,11 @@ export function readLines(socket: net.Socket, onLine: (line: string) => void): v
 }
 
 export function writeLine(socket: net.Socket, obj: unknown): void {
-    socket.write(JSON.stringify(obj) + "\n");
+    const line = JSON.stringify(obj) + "\n";
+    // drop oversize outbound; receiver would destroy socket otherwise
+    if (line.length > MAX_LINE_LEN) {
+        log.warn("line_too_long_outbound", { bytes: line.length, max: MAX_LINE_LEN });
+        return;
+    }
+    socket.write(line);
 }
