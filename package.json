@@ -1,6 +1,6 @@
 {
     "name": "claude-relay",
-    "version": "0.1.0",
+    "version": "0.1.2",
     "type": "module",
     "module": "src/channel.ts",
     "scripts": {
