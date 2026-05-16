@@ -4,6 +4,60 @@ All notable changes to this fork are documented here. Format based on [Keep a Ch
 
 This is an internal fork of [innestic/claude-relay](https://github.com/innestic/claude-relay) maintained by Eco Consulting. The public marketplace ships v0.1.0; this branch carries the extensions described below and is not currently distributed via the marketplace.
 
+## [0.3.0] — 2026-05-16
+
+Persistent groups: WhatsApp-style groups with offline delivery, admin governance, and disk-backed message storage.
+
+### Added
+
+- **9 new MCP tools**: `relay_group_create`, `relay_group_invite`, `relay_group_remove`, `relay_group_leave`, `relay_group_send`, `relay_group_history`, `relay_group_list`, `relay_group_info`, `relay_group_delete`.
+- **GroupStore** (`src/hub/groups.ts`): disk-backed JSON storage, one file per group at `{dataDir}/groups/`. Ring buffer (500 messages FIFO), `last_read` cursor per member, atomic writes via temp+rename.
+- **Admin governance**: creator = admin. Only admin can invite, remove (reason mandatory + logged as system message), and delete. Admin cannot leave or self-remove.
+- **Global group cap**: 200 groups max via `totalGroupCount()`.
+- **3 new error codes**: `not_member`, `not_admin`, `group_not_found`.
+
+### Security
+
+- **Path traversal protection**: `sanitizeSessionName()` applied to group name in all 9 handlers.
+- **Prototype chain bypass**: `Object.hasOwn(data.members, peer)` replaces `in` operator — prevents peers named "constructor" from bypassing membership checks.
+- **Disk exhaustion cap**: global 200-group limit prevents create+leave cycle attack.
+- **Admin guards**: admin cannot leave (`group_leave`) or self-remove (`group_remove`).
+- **Null guards**: all 5 mutating GroupStore functions throw on null load instead of unsafe cast.
+- **Defensive try/catch**: `handleLine` in hub wraps all handler dispatch; channel `hub-connection.ts` wraps listener calls.
+
+### Fixed
+
+- **Channel crash on `incoming_group_msg`**: `msg_id` sent as number in notification meta crashed Claude Code's handler. Fixed: `String(msg.msg_id)` in `buildGroupMsgNotification`.
+- **Windows UDS test failures**: removed `fs.existsSync()` guard in `waitForSocketReady` — Windows doesn't see Unix domain socket files via `existsSync`.
+- **Windows chmod test**: skipped on `win32` (Unix file permissions not supported).
+- **Broadcast timeout code**: changed from `"timeout"` to `"hub_unreachable"` for client-side hub ack timeout.
+
+### Changed
+
+- `PROTOCOL_VERSION` bumped from `"3"` to `"4"`.
+- Merged upstream v0.1.2: anti-broadcast fallback instruction, `MAX_TEXT_LEN` 512KB, `MAX_LINE_LEN` 1MB, verbatim quoting instruction.
+- Ask/broadcast timeout raised to 600s (10 min).
+- Minimal daemon environment on Windows (security).
+
+### Protocol
+
+- 9 new client→hub messages: `GroupCreateMsg`, `GroupInviteMsg`, `GroupRemoveMsg`, `GroupLeaveMsg`, `GroupSendMsg`, `GroupHistoryMsg`, `GroupListMsg`, `GroupInfoMsg`, `GroupDeleteMsg`.
+- 6 new hub→client messages: `GroupCreatedMsg`, `GroupAckMsg`, `GroupMessagesMsg`, `GroupListResultMsg`, `GroupInfoResultMsg`, `IncomingGroupMsgMsg`.
+
+### Tests
+
+- 21 new tests (11 GroupStore unit + 10 integration). Total suite: 244 (was 223).
+- All 244 pass on Windows.
+
+### Known debt
+
+- `handleRegister` is async but not awaited in `handleLine` try/catch — unhandled rejection risk on register failure.
+- Empty group name `""` returns `hub_unreachable` instead of `bad_args`.
+- Group existence enumerable via differentiated error codes (`group_not_found` vs `not_admin`).
+- `group_info` exposes `last_read` cursor of all members (read receipts — may be intentional).
+- `group_invite` accepts arbitrary strings as peer names without registry validation.
+- `group_delete` sends no notification to remaining members.
+
 ## [0.2.0] — 2026-05-07
 
 Two parallel features resolving pain points found on day one of multi-agent use.

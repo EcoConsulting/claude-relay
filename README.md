@@ -4,29 +4,31 @@ Let local Claude Code sessions talk to each other in natural language.
 
 Running two Claude sessions on different projects? In one, say _"ask the backend session if the auth token shape changed"_ and the other answers. Or _"ask everyone what they're working on"_ and replies stream back. Need a subgroup chat? Use rooms.
 
-> **Eco Consulting fork — v0.2.0.** This is a fork of [innestic/claude-relay](https://github.com/innestic/claude-relay) maintained by [Eco Consulting](https://github.com/EcoConsulting). The upstream ships v0.1.0; this fork adds **fixed identity**, **ephemeral rooms**, and **zombie eviction**. Install instructions below point to this fork; full release notes in [CHANGELOG.md](CHANGELOG.md).
+> **Eco Consulting fork — v0.3.0.** This is a fork of [innestic/claude-relay](https://github.com/innestic/claude-relay) maintained by [Eco Consulting](https://github.com/EcoConsulting). The upstream ships v0.1.0; this fork adds **fixed identity**, **ephemeral rooms**, **zombie eviction**, and **persistent groups**. Install instructions below point to this fork; full release notes in [CHANGELOG.md](CHANGELOG.md).
 
 <img width="1280" height="678" alt="ezgif-7f30f78a18c9905f" src="https://github.com/user-attachments/assets/9a132dfa-9db1-4550-96e0-cd25a2744fce" />
 
-## What's new in v0.2.0
+## What's new in v0.3.0
 
-Two parallel features built on top of the upstream v0.1.0, validated with a runtime 3-peer scenario:
+**Persistent groups** — WhatsApp-style groups that survive disconnections:
 
-**Block 1 — Fixed identity** (zombie eviction):
+- Nine new MCP tools: `relay_group_create`, `relay_group_invite`, `relay_group_remove`, `relay_group_leave`, `relay_group_send`, `relay_group_history`, `relay_group_list`, `relay_group_info`, `relay_group_delete`.
+- Messages stored on disk (JSON, one file per group). Offline members read later with `relay_group_history`.
+- Admin governance: creator = admin. Only admin can invite, remove (with mandatory reason), and delete.
+- Ring buffer: 500 messages per group (FIFO). `last_read` cursor per member.
+- Global cap: 200 groups max.
+- Security hardened: path traversal protection, `Object.hasOwn` for membership checks, admin self-removal blocked.
 
-- `RELAY_PEER_ID` env var pins a session to a stable name across restarts. No more `-2` / `-3` suffixes when you reopen a session that crashed.
-- The hub probes name collisions with a 500ms ping. If the existing peer doesn't respond, its slot is freed automatically.
-- Proactive 30-second sweep evicts non-responsive peers (orphan plugins whose Claude Code parent died but whose socket is still up).
-- Cross-platform parent-death detection on Windows.
+**Also in v0.3.0 (v0.2.1 merged):**
 
-**Block 2 — Ephemeral rooms** (subgroup messaging):
+- Merge upstream v0.1.2 (anti-broadcast fallback, 512KB text cap, 1MB line cap, verbatim quoting).
+- 10-minute ask/broadcast timeout (up from 2 min).
+- Windows daemon-spawn fix, `fs.existsSync` guard removed for UDS compatibility.
+- Defensive try/catch in hub `handleLine` and channel listener dispatch.
 
-- Four new MCP tools: `relay_join`, `relay_leave`, `relay_room`, `relay_rooms`.
-- IRC-style lifecycle: rooms are created on first join, destroyed when the last member leaves. No permissions, no persistence.
-- Auto-rejoin on hub reconnect.
-- Talk to a subgroup of peers without spamming everyone via `relay_broadcast`.
+**Previous releases:** v0.2.0 added fixed identity (`RELAY_PEER_ID`), zombie eviction, and ephemeral rooms. See [CHANGELOG.md](CHANGELOG.md).
 
-**Protocol**: `PROTOCOL_VERSION` bumped from `"2"` to `"3"`. Six new client→hub message types and four new hub→client message types. See [CHANGELOG.md](CHANGELOG.md) for the full list.
+**Protocol**: `PROTOCOL_VERSION` bumped to `"4"`. Nine new client→hub message types and six new hub→client message types for persistent groups. See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ## Install
 
@@ -70,17 +72,26 @@ Rename your session: `/relay-rename backend-api`. Natural language works too (_"
 
 ### Tools
 
-| Tool              | What it does                                                               |
-| ----------------- | -------------------------------------------------------------------------- |
-| `relay_peers`     | List active sessions on this machine                                       |
-| `relay_ask`       | Ask one peer; returns immediately, reply arrives as a notification         |
-| `relay_reply`     | Answer an incoming ask by `ask_id`                                         |
-| `relay_broadcast` | Ask every other peer; replies stream back as notifications                 |
-| `relay_rename`    | Rename this session                                                        |
-| `relay_join`      | Join an ephemeral room (created implicitly on first join) — **v0.2**       |
-| `relay_leave`     | Leave a room (destroyed implicitly when the last member leaves) — **v0.2** |
-| `relay_room`      | Send a fire-and-forget message to all members of a room — **v0.2**         |
-| `relay_rooms`     | List all active rooms with their members — **v0.2**                        |
+| Tool                  | What it does                                                               |
+| --------------------- | -------------------------------------------------------------------------- |
+| `relay_peers`         | List active sessions on this machine                                       |
+| `relay_ask`           | Ask one peer; returns immediately, reply arrives as a notification         |
+| `relay_reply`         | Answer an incoming ask by `ask_id`                                         |
+| `relay_broadcast`     | Ask every other peer; replies stream back as notifications                 |
+| `relay_rename`        | Rename this session                                                        |
+| `relay_join`          | Join an ephemeral room (created implicitly on first join) — **v0.2**       |
+| `relay_leave`         | Leave a room (destroyed implicitly when the last member leaves) — **v0.2** |
+| `relay_room`          | Send a fire-and-forget message to all members of a room — **v0.2**         |
+| `relay_rooms`         | List all active rooms with their members — **v0.2**                        |
+| `relay_group_create`  | Create a persistent group with initial members — **v0.3**                  |
+| `relay_group_invite`  | Invite a peer to a group (admin only) — **v0.3**                           |
+| `relay_group_remove`  | Remove a member with reason (admin only, logged) — **v0.3**                |
+| `relay_group_leave`   | Leave a group voluntarily (admin cannot leave) — **v0.3**                  |
+| `relay_group_send`    | Send message; stored + delivered to online members — **v0.3**              |
+| `relay_group_history` | Read unread messages; advances cursor — **v0.3**                           |
+| `relay_group_list`    | List your groups with unread counts — **v0.3**                             |
+| `relay_group_info`    | Group details: admin, members, online status — **v0.3**                    |
+| `relay_group_delete`  | Delete group and history (admin only) — **v0.3**                           |
 
 Claude routes to these automatically. You rarely call them by name.
 
@@ -125,6 +136,9 @@ Limits (configurable in `src/hub/handlers.ts`): up to 50 rooms total, 20 members
 | `hub_unreachable`    | Hub socket died or never replied                      |
 | `bad_args`           | Tool called with missing or wrong-typed arguments     |
 | `protocol_mismatch`  | Client version != hub version; kill the hub and retry |
+| `not_member`         | Caller is not a member of the group — **v0.3**        |
+| `not_admin`          | Caller is not the group admin — **v0.3**              |
+| `group_not_found`    | Group does not exist — **v0.3**                       |
 
 ## Debugging
 
@@ -153,7 +167,6 @@ Details: [docs/architecture.md](docs/architecture.md).
 
 ## Out of scope
 
-- No persistence — peer state lives in the hub process only
 - Single user per machine; no auth or access control
 - Same-host only; no cross-machine relaying
 
