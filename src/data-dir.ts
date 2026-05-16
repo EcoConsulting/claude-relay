@@ -19,3 +19,7 @@ export function hubSocketPath(): string {
 export function logsDir(): string {
     return path.join(dataDir(), "logs");
 }
+
+export function groupsDir(): string {
+    return path.join(dataDir(), "groups");
+}
