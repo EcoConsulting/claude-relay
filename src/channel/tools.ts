@@ -246,10 +246,9 @@ export async function relayGroupSend(
     const text = args.text;
     if (typeof group !== "string" || typeof text !== "string") return errResult("bad_args");
     if (text.length > MAX_TEXT_LEN) return errResult("bad_args");
-    const msgId = crypto.randomUUID();
     const reply = await ctx
         .getHub()
-        .sendRequest({ type: "group_send", group, text, msg_id: msgId }, ctx.requestTimeoutMs);
+        .sendRequest({ type: "group_send", group, text }, ctx.requestTimeoutMs);
     if (reply.type === "group_ack") return okResult({ ok: true });
     if (reply.type === "err") return errResult(reply.code);
     return errResult("unexpected");

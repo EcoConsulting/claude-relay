@@ -61,15 +61,25 @@ export function createGroupStore(dir: string) {
         return data;
     }
 
+    function totalGroupCount(): number {
+        try {
+            return fs.readdirSync(dir).filter((f) => f.endsWith(".json")).length;
+        } catch {
+            return 0;
+        }
+    }
+
     function addMember(name: string, peer: string): GroupData {
-        const data = load(name) as GroupData;
+        const data = load(name);
+        if (!data) throw new Error(`group ${name} not found`);
         data.members[peer] = { last_read: 0, joined_at: new Date().toISOString() };
         save(data);
         return data;
     }
 
     function removeMember(groupName: string, peer: string, reason: string, by: string): GroupData {
-        const data = load(groupName) as GroupData;
+        const data = load(groupName);
+        if (!data) throw new Error(`group ${groupName} not found`);
         data.members = Object.fromEntries(Object.entries(data.members).filter(([k]) => k !== peer));
         const msg: GroupMessage = {
             id: data.next_id++,
@@ -85,7 +95,8 @@ export function createGroupStore(dir: string) {
     }
 
     function leaveMember(groupName: string, peer: string): GroupData {
-        const data = load(groupName) as GroupData;
+        const data = load(groupName);
+        if (!data) throw new Error(`group ${groupName} not found`);
         data.members = Object.fromEntries(Object.entries(data.members).filter(([k]) => k !== peer));
         const msg: GroupMessage = {
             id: data.next_id++,
@@ -105,7 +116,8 @@ export function createGroupStore(dir: string) {
         from: string,
         text: string,
     ): { data: GroupData; message: GroupMessage } {
-        const data = load(groupName) as GroupData;
+        const data = load(groupName);
+        if (!data) throw new Error(`group ${groupName} not found`);
         const message: GroupMessage = {
             id: data.next_id++,
             from,
@@ -124,7 +136,8 @@ export function createGroupStore(dir: string) {
         peer: string,
         limit?: number,
     ): { messages: GroupMessage[]; remaining: number } {
-        const data = load(groupName) as GroupData;
+        const data = load(groupName);
+        if (!data) throw new Error(`group ${groupName} not found`);
         const member = data.members[peer];
         const lastRead = member?.last_read ?? 0;
         const unread = data.messages.filter((m) => m.id > lastRead);
@@ -198,5 +211,6 @@ export function createGroupStore(dir: string) {
         exists,
         isMember,
         isAdmin,
+        totalGroupCount,
     };
 }

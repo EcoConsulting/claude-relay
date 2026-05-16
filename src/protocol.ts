@@ -85,32 +85,31 @@ export const GroupCreateMsg = z.object({
 });
 export const GroupInviteMsg = z.object({
     type: z.literal("group_invite"),
-    group: z.string(),
+    group: z.string().min(1).max(64),
     peer: z.string(),
     req_id: z.string().optional(),
 });
 export const GroupRemoveMsg = z.object({
     type: z.literal("group_remove"),
-    group: z.string(),
+    group: z.string().min(1).max(64),
     peer: z.string(),
     reason: z.string().min(1).max(256),
     req_id: z.string().optional(),
 });
 export const GroupLeaveMsg = z.object({
     type: z.literal("group_leave"),
-    group: z.string(),
+    group: z.string().min(1).max(64),
     req_id: z.string().optional(),
 });
 export const GroupSendMsg = z.object({
     type: z.literal("group_send"),
-    group: z.string(),
+    group: z.string().min(1).max(64),
     text: z.string().max(MAX_TEXT_LEN),
-    msg_id: z.string(),
     req_id: z.string().optional(),
 });
 export const GroupHistoryMsg = z.object({
     type: z.literal("group_history"),
-    group: z.string(),
+    group: z.string().min(1).max(64),
     limit: z.number().min(1).max(500).optional(),
     req_id: z.string().optional(),
 });
@@ -120,12 +119,12 @@ export const GroupListMsg = z.object({
 });
 export const GroupInfoMsg = z.object({
     type: z.literal("group_info"),
-    group: z.string(),
+    group: z.string().min(1).max(64),
     req_id: z.string().optional(),
 });
 export const GroupDeleteMsg = z.object({
     type: z.literal("group_delete"),
-    group: z.string(),
+    group: z.string().min(1).max(64),
     req_id: z.string().optional(),
 });
 

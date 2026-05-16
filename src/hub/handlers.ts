@@ -33,7 +33,7 @@ const log = makeLogger("hub");
 
 export const MAX_ROOMS = 50;
 export const MAX_MEMBERS_PER_ROOM = 20;
-export const MAX_GROUPS = 50;
+export const MAX_GROUPS = 200;
 export const MAX_GROUP_MEMBERS = 20;
 
 export type HubContext = {
@@ -406,7 +406,7 @@ export function handleGroupCreate(
             message: "group_exists",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    if (ctx.groups.listForPeer(caller).length >= MAX_GROUPS)
+    if (ctx.groups.totalGroupCount() >= MAX_GROUPS)
         return send({
             type: "err",
             code: "bad_args",
@@ -435,19 +435,34 @@ export function handleGroupInvite(
             code: "not_registered",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    if (!ctx.groups.exists(msg.group))
+    const sanitized = sanitizeSessionName(msg.group);
+    if (sanitized === null)
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "invalid group name",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.exists(sanitized))
         return send({
             type: "err",
             code: "group_not_found",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    if (!ctx.groups.isAdmin(msg.group, caller))
+    if (!ctx.groups.isAdmin(sanitized, caller))
         return send({
             type: "err",
             code: "not_admin",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    const data = ctx.groups.load(msg.group);
+    if (ctx.groups.isMember(sanitized, msg.peer))
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "already_member",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    const data = ctx.groups.load(sanitized);
     if (data && Object.keys(data.members).length >= MAX_GROUP_MEMBERS)
         return send({
             type: "err",
@@ -455,7 +470,7 @@ export function handleGroupInvite(
             message: `member_limit_reached (max ${MAX_GROUP_MEMBERS})`,
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    ctx.groups.addMember(msg.group, msg.peer);
+    ctx.groups.addMember(sanitized, msg.peer);
     send({ type: "group_ack", ...(msg.req_id ? { req_id: msg.req_id } : {}) });
 }
 
@@ -472,19 +487,27 @@ export function handleGroupRemove(
             code: "not_registered",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    if (!ctx.groups.exists(msg.group))
+    const sanitized = sanitizeSessionName(msg.group);
+    if (sanitized === null)
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "invalid group name",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.exists(sanitized))
         return send({
             type: "err",
             code: "group_not_found",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    if (!ctx.groups.isAdmin(msg.group, caller))
+    if (!ctx.groups.isAdmin(sanitized, caller))
         return send({
             type: "err",
             code: "not_admin",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    ctx.groups.removeMember(msg.group, msg.peer, msg.reason, caller);
+    ctx.groups.removeMember(sanitized, msg.peer, msg.reason, caller);
     send({ type: "group_ack", ...(msg.req_id ? { req_id: msg.req_id } : {}) });
 }
 
@@ -501,13 +524,28 @@ export function handleGroupLeave(
             code: "not_registered",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    if (!ctx.groups.isMember(msg.group, caller))
+    const sanitized = sanitizeSessionName(msg.group);
+    if (sanitized === null)
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "invalid group name",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.isMember(sanitized, caller))
         return send({
             type: "err",
             code: "not_member",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    ctx.groups.leaveMember(msg.group, caller);
+    if (ctx.groups.isAdmin(sanitized, caller))
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "admin cannot leave (use group_delete)",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    ctx.groups.leaveMember(sanitized, caller);
     send({ type: "group_ack", ...(msg.req_id ? { req_id: msg.req_id } : {}) });
 }
 
@@ -524,18 +562,26 @@ export function handleGroupSend(
             code: "not_registered",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    if (!ctx.groups.isMember(msg.group, caller))
+    const sanitized = sanitizeSessionName(msg.group);
+    if (sanitized === null)
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "invalid group name",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.isMember(sanitized, caller))
         return send({
             type: "err",
             code: "not_member",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    const { data, message } = ctx.groups.addMessage(msg.group, caller, msg.text);
+    const { data, message } = ctx.groups.addMessage(sanitized, caller, msg.text);
     for (const memberName of Object.keys(data.members)) {
         if (memberName === caller) continue;
         ctx.sendTo(memberName, {
             type: "incoming_group_msg",
-            group: msg.group,
+            group: sanitized,
             from: caller,
             text: message.text,
             msg_id: message.id,
@@ -558,16 +604,24 @@ export function handleGroupHistory(
             code: "not_registered",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    if (!ctx.groups.isMember(msg.group, caller))
+    const sanitized = sanitizeSessionName(msg.group);
+    if (sanitized === null)
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "invalid group name",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.isMember(sanitized, caller))
         return send({
             type: "err",
             code: "not_member",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    const { messages, remaining } = ctx.groups.getUnread(msg.group, caller, msg.limit);
+    const { messages, remaining } = ctx.groups.getUnread(sanitized, caller, msg.limit);
     send({
         type: "group_messages",
-        group: msg.group,
+        group: sanitized,
         messages,
         unread_remaining: remaining,
         ...(msg.req_id ? { req_id: msg.req_id } : {}),
@@ -587,8 +641,12 @@ export function handleGroupList(
             code: "not_registered",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    const groups = ctx.groups.listForPeer(caller);
-    send({ type: "group_list_result", groups, ...(msg.req_id ? { req_id: msg.req_id } : {}) });
+    const groupList = ctx.groups.listForPeer(caller);
+    send({
+        type: "group_list_result",
+        groups: groupList,
+        ...(msg.req_id ? { req_id: msg.req_id } : {}),
+    });
 }
 
 export function handleGroupInfo(
@@ -604,13 +662,21 @@ export function handleGroupInfo(
             code: "not_registered",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    if (!ctx.groups.isMember(msg.group, caller))
+    const sanitized = sanitizeSessionName(msg.group);
+    if (sanitized === null)
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "invalid group name",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.isMember(sanitized, caller))
         return send({
             type: "err",
             code: "not_member",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    const data = ctx.groups.getInfo(msg.group);
+    const data = ctx.groups.getInfo(sanitized);
     if (!data)
         return send({
             type: "err",
@@ -627,7 +693,7 @@ export function handleGroupInfo(
     }));
     send({
         type: "group_info_result",
-        group: msg.group,
+        group: sanitized,
         admin: data.admin,
         members,
         unread_count,
@@ -648,18 +714,26 @@ export function handleGroupDelete(
             code: "not_registered",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    if (!ctx.groups.exists(msg.group))
+    const sanitized = sanitizeSessionName(msg.group);
+    if (sanitized === null)
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "invalid group name",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.exists(sanitized))
         return send({
             type: "err",
             code: "group_not_found",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    if (!ctx.groups.isAdmin(msg.group, caller))
+    if (!ctx.groups.isAdmin(sanitized, caller))
         return send({
             type: "err",
             code: "not_admin",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
-    ctx.groups.deleteGroup(msg.group);
+    ctx.groups.deleteGroup(sanitized);
     send({ type: "group_ack", ...(msg.req_id ? { req_id: msg.req_id } : {}) });
 }

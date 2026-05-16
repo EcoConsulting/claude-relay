@@ -4,6 +4,7 @@ export type JsonSchemaProperty = {
     type: string;
     description?: string;
     maxLength?: number;
+    items?: { type: string };
 };
 
 export type JsonSchemaObject = {
@@ -140,6 +141,7 @@ export const TOOLS: ToolSchema[] = [
                 },
                 members: {
                     type: "array",
+                    items: { type: "string" },
                     description: "Initial member names (max 20). You are always included.",
                 },
             },
@@ -179,7 +181,7 @@ export const TOOLS: ToolSchema[] = [
     {
         name: "relay_group_leave",
         description:
-            "Leave a group voluntarily. If you are the admin, the group becomes admin-less (no one can invite/remove/delete).",
+            "Leave a group voluntarily. Admins cannot leave — use relay_group_delete to delete the group first.",
         inputSchema: {
             type: "object",
             properties: {
