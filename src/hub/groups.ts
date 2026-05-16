@@ -163,7 +163,7 @@ export function createGroupStore(dir: string) {
         for (const f of files) {
             const name = f.slice(0, -5);
             const data = load(name);
-            if (!data || !(peer in data.members)) continue;
+            if (!data || !Object.hasOwn(data.members, peer)) continue;
             const memberData = data.members[peer];
             const lastRead = memberData?.last_read ?? 0;
             const unread_count = data.messages.filter((m) => m.id > lastRead).length;
@@ -188,7 +188,7 @@ export function createGroupStore(dir: string) {
 
     function isMember(name: string, peer: string): boolean {
         const data = load(name);
-        return data !== null && peer in data.members;
+        return data !== null && Object.hasOwn(data.members, peer);
     }
 
     function isAdmin(name: string, peer: string): boolean {
