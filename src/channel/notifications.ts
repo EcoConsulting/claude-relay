@@ -61,3 +61,15 @@ export function buildRoomMsgNotification(
         },
     };
 }
+
+export function buildGroupMsgNotification(
+    msg: Extract<ServerMsg, { type: "incoming_group_msg" }>,
+): ChannelNotification {
+    return {
+        method: METHOD,
+        params: {
+            content: msg.text,
+            meta: { from: msg.from, group: msg.group, msg_id: msg.msg_id, ts: msg.ts },
+        },
+    };
+}

@@ -4,6 +4,7 @@ import type { HubConnection } from "./hub-connection";
 import {
     buildAskErrorNotification,
     buildAskNotification,
+    buildGroupMsgNotification,
     buildReplyNotification,
     buildRoomMsgNotification,
     type ChannelNotification,
@@ -60,6 +61,10 @@ export function wireHubRouting(
         }
         if (m.type === "incoming_room_msg") {
             emitNotification(buildRoomMsgNotification(m));
+            return;
+        }
+        if (m.type === "incoming_group_msg") {
+            emitNotification(buildGroupMsgNotification(m));
             return;
         }
         if (m.type === "err" && m.ask_id) {
