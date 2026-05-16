@@ -1,12 +1,23 @@
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
+import { groupsDir } from "../data-dir";
 import { readLines, writeLine } from "../framing";
 import { makeLogger } from "../logger";
 import { ClientMsgSchema, type ServerMsg } from "../protocol";
+import { createGroupStore } from "./groups";
 import {
     handleAsk,
     handleBroadcast,
+    handleGroupCreate,
+    handleGroupDelete,
+    handleGroupHistory,
+    handleGroupInfo,
+    handleGroupInvite,
+    handleGroupLeave,
+    handleGroupList,
+    handleGroupRemove,
+    handleGroupSend,
     handleJoinRoom,
     handleLeaveRoom,
     handleListPeers,
@@ -57,6 +68,7 @@ export async function startHub(opts: StartHubOptions): Promise<HubHandle> {
 
     const registry = createPeerRegistry();
     const pendingAsks = createPendingAsks(opts.pendingAsks);
+    const groups = createGroupStore(groupsDir());
 
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     const cancelIdleTimer = () => {
@@ -94,7 +106,7 @@ export async function startHub(opts: StartHubOptions): Promise<HubHandle> {
         }
     };
 
-    const ctx: HubContext = { registry, pendingAsks, defaultAskTimeoutMs, sendTo };
+    const ctx: HubContext = { registry, pendingAsks, defaultAskTimeoutMs, sendTo, groups };
 
     const handleLine = (line: string, socket: net.Socket, send: (msg: ServerMsg) => void) => {
         let raw: unknown;
@@ -140,6 +152,24 @@ export async function startHub(opts: StartHubOptions): Promise<HubHandle> {
                 return handleRoomMsg(ctx, socket, msg, send);
             case "list_rooms":
                 return handleListRooms(ctx, socket, msg, send);
+            case "group_create":
+                return handleGroupCreate(ctx, socket, msg, send);
+            case "group_invite":
+                return handleGroupInvite(ctx, socket, msg, send);
+            case "group_remove":
+                return handleGroupRemove(ctx, socket, msg, send);
+            case "group_leave":
+                return handleGroupLeave(ctx, socket, msg, send);
+            case "group_send":
+                return handleGroupSend(ctx, socket, msg, send);
+            case "group_history":
+                return handleGroupHistory(ctx, socket, msg, send);
+            case "group_list":
+                return handleGroupList(ctx, socket, msg, send);
+            case "group_info":
+                return handleGroupInfo(ctx, socket, msg, send);
+            case "group_delete":
+                return handleGroupDelete(ctx, socket, msg, send);
             case "pong":
                 return ctx.registry.handlePong(msg.req_id);
         }

@@ -6,6 +6,15 @@ import {
     PROTOCOL_VERSION,
     type AskMsg,
     type BroadcastMsg,
+    type GroupCreateMsg,
+    type GroupDeleteMsg,
+    type GroupHistoryMsg,
+    type GroupInfoMsg,
+    type GroupInviteMsg,
+    type GroupLeaveMsg,
+    type GroupListMsg,
+    type GroupRemoveMsg,
+    type GroupSendMsg,
     type JoinRoomMsg,
     type LeaveRoomMsg,
     type ListPeersMsg,
@@ -16,6 +25,7 @@ import {
     type RoomMsgMsg,
     type ServerMsg,
 } from "../protocol";
+import type { GroupStore } from "./groups";
 import type { PendingAsks } from "./pending-asks";
 import type { PeerRegistry } from "./registry";
 
@@ -23,12 +33,15 @@ const log = makeLogger("hub");
 
 export const MAX_ROOMS = 50;
 export const MAX_MEMBERS_PER_ROOM = 20;
+export const MAX_GROUPS = 50;
+export const MAX_GROUP_MEMBERS = 20;
 
 export type HubContext = {
     registry: PeerRegistry;
     pendingAsks: PendingAsks;
     defaultAskTimeoutMs: number;
     sendTo: (name: string, msg: ServerMsg) => boolean;
+    groups: GroupStore;
 };
 
 type Send = (m: ServerMsg) => void;
@@ -363,4 +376,290 @@ export function handleListRooms(
         rooms: roomsList,
         ...(msg.req_id ? { req_id: msg.req_id } : {}),
     });
+}
+
+export function handleGroupCreate(
+    ctx: HubContext,
+    socket: net.Socket,
+    msg: z.infer<typeof GroupCreateMsg>,
+    send: Send,
+): void {
+    const caller = ctx.registry.getName(socket);
+    if (!caller)
+        return send({
+            type: "err",
+            code: "not_registered",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    const sanitized = sanitizeSessionName(msg.name);
+    if (sanitized === null)
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "invalid group name",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (ctx.groups.exists(sanitized))
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "group_exists",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (ctx.groups.listForPeer(caller).length >= MAX_GROUPS)
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: `group_limit_reached (max ${MAX_GROUPS})`,
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    const data = ctx.groups.create(sanitized, caller, msg.members);
+    send({
+        type: "group_created",
+        group: sanitized,
+        members: Object.keys(data.members),
+        ...(msg.req_id ? { req_id: msg.req_id } : {}),
+    });
+}
+
+export function handleGroupInvite(
+    ctx: HubContext,
+    socket: net.Socket,
+    msg: z.infer<typeof GroupInviteMsg>,
+    send: Send,
+): void {
+    const caller = ctx.registry.getName(socket);
+    if (!caller)
+        return send({
+            type: "err",
+            code: "not_registered",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.exists(msg.group))
+        return send({
+            type: "err",
+            code: "group_not_found",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.isAdmin(msg.group, caller))
+        return send({
+            type: "err",
+            code: "not_admin",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    const data = ctx.groups.load(msg.group);
+    if (data && Object.keys(data.members).length >= MAX_GROUP_MEMBERS)
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: `member_limit_reached (max ${MAX_GROUP_MEMBERS})`,
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    ctx.groups.addMember(msg.group, msg.peer);
+    send({ type: "group_ack", ...(msg.req_id ? { req_id: msg.req_id } : {}) });
+}
+
+export function handleGroupRemove(
+    ctx: HubContext,
+    socket: net.Socket,
+    msg: z.infer<typeof GroupRemoveMsg>,
+    send: Send,
+): void {
+    const caller = ctx.registry.getName(socket);
+    if (!caller)
+        return send({
+            type: "err",
+            code: "not_registered",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.exists(msg.group))
+        return send({
+            type: "err",
+            code: "group_not_found",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.isAdmin(msg.group, caller))
+        return send({
+            type: "err",
+            code: "not_admin",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    ctx.groups.removeMember(msg.group, msg.peer, msg.reason, caller);
+    send({ type: "group_ack", ...(msg.req_id ? { req_id: msg.req_id } : {}) });
+}
+
+export function handleGroupLeave(
+    ctx: HubContext,
+    socket: net.Socket,
+    msg: z.infer<typeof GroupLeaveMsg>,
+    send: Send,
+): void {
+    const caller = ctx.registry.getName(socket);
+    if (!caller)
+        return send({
+            type: "err",
+            code: "not_registered",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.isMember(msg.group, caller))
+        return send({
+            type: "err",
+            code: "not_member",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    ctx.groups.leaveMember(msg.group, caller);
+    send({ type: "group_ack", ...(msg.req_id ? { req_id: msg.req_id } : {}) });
+}
+
+export function handleGroupSend(
+    ctx: HubContext,
+    socket: net.Socket,
+    msg: z.infer<typeof GroupSendMsg>,
+    send: Send,
+): void {
+    const caller = ctx.registry.getName(socket);
+    if (!caller)
+        return send({
+            type: "err",
+            code: "not_registered",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.isMember(msg.group, caller))
+        return send({
+            type: "err",
+            code: "not_member",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    const { data, message } = ctx.groups.addMessage(msg.group, caller, msg.text);
+    for (const memberName of Object.keys(data.members)) {
+        if (memberName === caller) continue;
+        ctx.sendTo(memberName, {
+            type: "incoming_group_msg",
+            group: msg.group,
+            from: caller,
+            text: message.text,
+            msg_id: message.id,
+            ts: message.ts,
+        });
+    }
+    send({ type: "group_ack", ...(msg.req_id ? { req_id: msg.req_id } : {}) });
+}
+
+export function handleGroupHistory(
+    ctx: HubContext,
+    socket: net.Socket,
+    msg: z.infer<typeof GroupHistoryMsg>,
+    send: Send,
+): void {
+    const caller = ctx.registry.getName(socket);
+    if (!caller)
+        return send({
+            type: "err",
+            code: "not_registered",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.isMember(msg.group, caller))
+        return send({
+            type: "err",
+            code: "not_member",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    const { messages, remaining } = ctx.groups.getUnread(msg.group, caller, msg.limit);
+    send({
+        type: "group_messages",
+        group: msg.group,
+        messages,
+        unread_remaining: remaining,
+        ...(msg.req_id ? { req_id: msg.req_id } : {}),
+    });
+}
+
+export function handleGroupList(
+    ctx: HubContext,
+    socket: net.Socket,
+    msg: z.infer<typeof GroupListMsg>,
+    send: Send,
+): void {
+    const caller = ctx.registry.getName(socket);
+    if (!caller)
+        return send({
+            type: "err",
+            code: "not_registered",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    const groups = ctx.groups.listForPeer(caller);
+    send({ type: "group_list_result", groups, ...(msg.req_id ? { req_id: msg.req_id } : {}) });
+}
+
+export function handleGroupInfo(
+    ctx: HubContext,
+    socket: net.Socket,
+    msg: z.infer<typeof GroupInfoMsg>,
+    send: Send,
+): void {
+    const caller = ctx.registry.getName(socket);
+    if (!caller)
+        return send({
+            type: "err",
+            code: "not_registered",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.isMember(msg.group, caller))
+        return send({
+            type: "err",
+            code: "not_member",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    const data = ctx.groups.getInfo(msg.group);
+    if (!data)
+        return send({
+            type: "err",
+            code: "group_not_found",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    const memberData = data.members[caller];
+    const lastRead = memberData?.last_read ?? 0;
+    const unread_count = data.messages.filter((m) => m.id > lastRead).length;
+    const members = Object.entries(data.members).map(([name, m]) => ({
+        name,
+        last_read: m.last_read,
+        online: ctx.registry.hasName(name),
+    }));
+    send({
+        type: "group_info_result",
+        group: msg.group,
+        admin: data.admin,
+        members,
+        unread_count,
+        ...(msg.req_id ? { req_id: msg.req_id } : {}),
+    });
+}
+
+export function handleGroupDelete(
+    ctx: HubContext,
+    socket: net.Socket,
+    msg: z.infer<typeof GroupDeleteMsg>,
+    send: Send,
+): void {
+    const caller = ctx.registry.getName(socket);
+    if (!caller)
+        return send({
+            type: "err",
+            code: "not_registered",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.exists(msg.group))
+        return send({
+            type: "err",
+            code: "group_not_found",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    if (!ctx.groups.isAdmin(msg.group, caller))
+        return send({
+            type: "err",
+            code: "not_admin",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
+    ctx.groups.deleteGroup(msg.group);
+    send({ type: "group_ack", ...(msg.req_id ? { req_id: msg.req_id } : {}) });
 }
