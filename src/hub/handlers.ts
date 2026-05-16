@@ -507,6 +507,13 @@ export function handleGroupRemove(
             code: "not_admin",
             ...(msg.req_id ? { req_id: msg.req_id } : {}),
         });
+    if (msg.peer === caller)
+        return send({
+            type: "err",
+            code: "bad_args",
+            message: "admin_cannot_remove_self",
+            ...(msg.req_id ? { req_id: msg.req_id } : {}),
+        });
     ctx.groups.removeMember(sanitized, msg.peer, msg.reason, caller);
     send({ type: "group_ack", ...(msg.req_id ? { req_id: msg.req_id } : {}) });
 }
