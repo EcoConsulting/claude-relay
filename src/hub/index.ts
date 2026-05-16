@@ -131,47 +131,55 @@ export async function startHub(opts: StartHubOptions): Promise<HubHandle> {
         }
         const msg = parsed.data;
         ctx.registry.touch(socket);
-        switch (msg.type) {
-            case "register":
-                return handleRegister(ctx, socket, msg, send);
-            case "rename":
-                return handleRename(ctx, socket, msg, send);
-            case "list_peers":
-                return handleListPeers(ctx, socket, msg, send);
-            case "ask":
-                return handleAsk(ctx, socket, msg, send);
-            case "reply":
-                return handleReply(ctx, socket, msg, send);
-            case "broadcast":
-                return handleBroadcast(ctx, socket, msg, send);
-            case "join_room":
-                return handleJoinRoom(ctx, socket, msg, send);
-            case "leave_room":
-                return handleLeaveRoom(ctx, socket, msg, send);
-            case "room_msg":
-                return handleRoomMsg(ctx, socket, msg, send);
-            case "list_rooms":
-                return handleListRooms(ctx, socket, msg, send);
-            case "group_create":
-                return handleGroupCreate(ctx, socket, msg, send);
-            case "group_invite":
-                return handleGroupInvite(ctx, socket, msg, send);
-            case "group_remove":
-                return handleGroupRemove(ctx, socket, msg, send);
-            case "group_leave":
-                return handleGroupLeave(ctx, socket, msg, send);
-            case "group_send":
-                return handleGroupSend(ctx, socket, msg, send);
-            case "group_history":
-                return handleGroupHistory(ctx, socket, msg, send);
-            case "group_list":
-                return handleGroupList(ctx, socket, msg, send);
-            case "group_info":
-                return handleGroupInfo(ctx, socket, msg, send);
-            case "group_delete":
-                return handleGroupDelete(ctx, socket, msg, send);
-            case "pong":
-                return ctx.registry.handlePong(msg.req_id);
+        try {
+            switch (msg.type) {
+                case "register":
+                    return handleRegister(ctx, socket, msg, send);
+                case "rename":
+                    return handleRename(ctx, socket, msg, send);
+                case "list_peers":
+                    return handleListPeers(ctx, socket, msg, send);
+                case "ask":
+                    return handleAsk(ctx, socket, msg, send);
+                case "reply":
+                    return handleReply(ctx, socket, msg, send);
+                case "broadcast":
+                    return handleBroadcast(ctx, socket, msg, send);
+                case "join_room":
+                    return handleJoinRoom(ctx, socket, msg, send);
+                case "leave_room":
+                    return handleLeaveRoom(ctx, socket, msg, send);
+                case "room_msg":
+                    return handleRoomMsg(ctx, socket, msg, send);
+                case "list_rooms":
+                    return handleListRooms(ctx, socket, msg, send);
+                case "group_create":
+                    return handleGroupCreate(ctx, socket, msg, send);
+                case "group_invite":
+                    return handleGroupInvite(ctx, socket, msg, send);
+                case "group_remove":
+                    return handleGroupRemove(ctx, socket, msg, send);
+                case "group_leave":
+                    return handleGroupLeave(ctx, socket, msg, send);
+                case "group_send":
+                    return handleGroupSend(ctx, socket, msg, send);
+                case "group_history":
+                    return handleGroupHistory(ctx, socket, msg, send);
+                case "group_list":
+                    return handleGroupList(ctx, socket, msg, send);
+                case "group_info":
+                    return handleGroupInfo(ctx, socket, msg, send);
+                case "group_delete":
+                    return handleGroupDelete(ctx, socket, msg, send);
+                case "pong":
+                    return ctx.registry.handlePong(msg.req_id);
+            }
+        } catch (e) {
+            log.error("handler_crash", {
+                type: msg.type,
+                err: e instanceof Error ? e.message : String(e),
+            });
+            send({ type: "err", code: "unexpected" });
         }
     };
 

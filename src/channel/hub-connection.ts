@@ -31,7 +31,16 @@ export function createHubConnection(socket: net.Socket) {
             broadcast_id: (m as { broadcast_id?: string }).broadcast_id,
             from: (m as { from?: string }).from,
         });
-        for (const l of listeners) l(m);
+        for (const l of listeners) {
+            try {
+                l(m);
+            } catch (e) {
+                log.error("listener_crash", {
+                    type: m.type,
+                    err: e instanceof Error ? e.message : String(e),
+                });
+            }
+        }
     }
 
     function onMessage(cb: MessageListener): () => void {
