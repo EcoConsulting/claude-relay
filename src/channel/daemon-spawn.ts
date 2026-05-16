@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 
@@ -33,10 +32,10 @@ export async function waitForSocketReady(
 ): Promise<net.Socket | null> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        if (fs.existsSync(socketPath)) {
-            const sock = await tryConnect(socketPath);
-            if (sock) return sock;
-        }
+        // Skip fs.existsSync: on Windows it doesn't see Unix domain socket files,
+        // so we try connecting directly and let it fail gracefully.
+        const sock = await tryConnect(socketPath);
+        if (sock) return sock;
         await new Promise((r) => setTimeout(r, 25));
     }
     return null;

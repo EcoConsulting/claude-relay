@@ -130,7 +130,7 @@ describe("channel lifecycle", () => {
         expect(instr.toLowerCase()).toContain("fallback");
     });
 
-    test("exposes 9 tool stubs (5 core + 4 rooms)", async () => {
+    test("exposes 18 tool stubs (5 core + 4 rooms + 9 groups)", async () => {
         const ch = await startCh({ socketPath: sockPath });
         closers.push(() => ch.close());
         const tools = ch.getToolNames();
@@ -145,6 +145,15 @@ describe("channel lifecycle", () => {
                 "relay_reply",
                 "relay_room",
                 "relay_rooms",
+                "relay_group_create",
+                "relay_group_invite",
+                "relay_group_remove",
+                "relay_group_leave",
+                "relay_group_send",
+                "relay_group_history",
+                "relay_group_list",
+                "relay_group_info",
+                "relay_group_delete",
             ].sort(),
         );
     });

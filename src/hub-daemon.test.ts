@@ -17,17 +17,21 @@ function tmpSocket(): string {
 async function waitForSocket(socketPath: string, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        if (fs.existsSync(socketPath)) {
-            const ok = await new Promise<boolean>((resolve) => {
-                const probe = net.createConnection(socketPath);
-                probe.once("connect", () => {
-                    probe.destroy();
-                    resolve(true);
-                });
-                probe.once("error", () => resolve(false));
+        // Skip fs.existsSync: on Windows it doesn't see Unix domain socket files.
+        // Use new Socket() + on("error") before connect() so the handler is
+        // registered before the async error can fire (net.createConnection calls
+        // connect() internally, which may fire "error" before we can attach).
+        const ok = await new Promise<boolean>((resolve) => {
+            const probe = new net.Socket();
+            probe.on("error", () => {});
+            probe.once("connect", () => {
+                probe.destroy();
+                resolve(true);
             });
-            if (ok) return;
-        }
+            probe.once("error", () => resolve(false));
+            probe.connect(socketPath);
+        });
+        if (ok) return;
         await new Promise((r) => setTimeout(r, 25));
     }
     throw new Error(`socket did not appear at ${socketPath} within ${timeoutMs}ms`);

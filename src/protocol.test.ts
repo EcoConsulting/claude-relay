@@ -56,8 +56,8 @@ describe("protocol client messages", () => {
         expect(PROTOCOL_VERSION.length).toBeGreaterThan(0);
     });
 
-    test("PROTOCOL_VERSION is '3'", () => {
-        expect(PROTOCOL_VERSION).toBe("3");
+    test("PROTOCOL_VERSION is '4'", () => {
+        expect(PROTOCOL_VERSION).toBe("4");
     });
 
     test("ErrCodeSchema accepts protocol_mismatch", () => {

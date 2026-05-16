@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { hubSocketPath } from "./data-dir";
 
-export const PROTOCOL_VERSION = "3";
+export const PROTOCOL_VERSION = "4";
 
 // 512 KiB body cap leaves headroom under the 1 MiB framing.MAX_LINE_LEN for JSON envelope and escapes.
 export const MAX_TEXT_LEN = 512 * 1024;
@@ -77,6 +77,58 @@ export const ListRoomsMsg = z.object({
     req_id: z.string().optional(),
 });
 
+export const GroupCreateMsg = z.object({
+    type: z.literal("group_create"),
+    name: z.string().min(1).max(64),
+    members: z.array(z.string()).max(20),
+    req_id: z.string().optional(),
+});
+export const GroupInviteMsg = z.object({
+    type: z.literal("group_invite"),
+    group: z.string(),
+    peer: z.string(),
+    req_id: z.string().optional(),
+});
+export const GroupRemoveMsg = z.object({
+    type: z.literal("group_remove"),
+    group: z.string(),
+    peer: z.string(),
+    reason: z.string().min(1).max(256),
+    req_id: z.string().optional(),
+});
+export const GroupLeaveMsg = z.object({
+    type: z.literal("group_leave"),
+    group: z.string(),
+    req_id: z.string().optional(),
+});
+export const GroupSendMsg = z.object({
+    type: z.literal("group_send"),
+    group: z.string(),
+    text: z.string().max(MAX_TEXT_LEN),
+    msg_id: z.string(),
+    req_id: z.string().optional(),
+});
+export const GroupHistoryMsg = z.object({
+    type: z.literal("group_history"),
+    group: z.string(),
+    limit: z.number().min(1).max(500).optional(),
+    req_id: z.string().optional(),
+});
+export const GroupListMsg = z.object({
+    type: z.literal("group_list"),
+    req_id: z.string().optional(),
+});
+export const GroupInfoMsg = z.object({
+    type: z.literal("group_info"),
+    group: z.string(),
+    req_id: z.string().optional(),
+});
+export const GroupDeleteMsg = z.object({
+    type: z.literal("group_delete"),
+    group: z.string(),
+    req_id: z.string().optional(),
+});
+
 export const ClientMsgSchema = z.discriminatedUnion("type", [
     RegisterMsg,
     RenameMsg,
@@ -89,6 +141,15 @@ export const ClientMsgSchema = z.discriminatedUnion("type", [
     LeaveRoomMsg,
     RoomMsgMsg,
     ListRoomsMsg,
+    GroupCreateMsg,
+    GroupInviteMsg,
+    GroupRemoveMsg,
+    GroupLeaveMsg,
+    GroupSendMsg,
+    GroupHistoryMsg,
+    GroupListMsg,
+    GroupInfoMsg,
+    GroupDeleteMsg,
 ]);
 
 export const AckMsg = z.object({
@@ -109,6 +170,9 @@ export const ErrCodeSchema = z.enum([
     "bad_args",
     "protocol_mismatch",
     "unexpected",
+    "not_member",
+    "not_admin",
+    "group_not_found",
 ]);
 
 export type ErrCode = z.infer<typeof ErrCodeSchema>;
@@ -196,6 +260,52 @@ export const RoomsListMsg = z.object({
     req_id: z.string().optional(),
 });
 
+export const GroupCreatedMsg = z.object({
+    type: z.literal("group_created"),
+    group: z.string(),
+    members: z.array(z.string()),
+    req_id: z.string().optional(),
+});
+export const GroupAckMsg = z.object({
+    type: z.literal("group_ack"),
+    req_id: z.string().optional(),
+});
+export const GroupMessageEntry = z.object({
+    id: z.number(),
+    from: z.string(),
+    text: z.string(),
+    ts: z.string(),
+    type: z.enum(["message", "system"]),
+});
+export const GroupMessagesMsg = z.object({
+    type: z.literal("group_messages"),
+    group: z.string(),
+    messages: z.array(GroupMessageEntry),
+    unread_remaining: z.number(),
+    req_id: z.string().optional(),
+});
+export const GroupListResultMsg = z.object({
+    type: z.literal("group_list_result"),
+    groups: z.array(z.object({ name: z.string(), unread_count: z.number() })),
+    req_id: z.string().optional(),
+});
+export const GroupInfoResultMsg = z.object({
+    type: z.literal("group_info_result"),
+    group: z.string(),
+    admin: z.string(),
+    members: z.array(z.object({ name: z.string(), last_read: z.number(), online: z.boolean() })),
+    unread_count: z.number(),
+    req_id: z.string().optional(),
+});
+export const IncomingGroupMsgMsg = z.object({
+    type: z.literal("incoming_group_msg"),
+    group: z.string(),
+    from: z.string(),
+    text: z.string(),
+    msg_id: z.number(),
+    ts: z.string(),
+});
+
 export const ServerMsgSchema = z.discriminatedUnion("type", [
     AckMsg,
     ErrMsg,
@@ -208,6 +318,12 @@ export const ServerMsgSchema = z.discriminatedUnion("type", [
     RoomSendAckMsg,
     IncomingRoomMsgMsg,
     RoomsListMsg,
+    GroupCreatedMsg,
+    GroupAckMsg,
+    GroupMessagesMsg,
+    GroupListResultMsg,
+    GroupInfoResultMsg,
+    IncomingGroupMsgMsg,
 ]);
 
 export type ClientMsg = z.infer<typeof ClientMsgSchema>;

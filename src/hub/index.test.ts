@@ -18,6 +18,7 @@ describe("hub lifecycle", () => {
     });
 
     test("socket file mode is 0o600 after hub starts", () => {
+        if (process.platform === "win32") return; // Windows doesn't support Unix file permissions
         expect(fs.statSync(sockPath).mode & 0o777).toBe(0o600);
     });
 
