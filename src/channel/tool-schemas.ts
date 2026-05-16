@@ -1,6 +1,9 @@
+import { MAX_TEXT_LEN } from "../protocol";
+
 export type JsonSchemaProperty = {
     type: string;
     description?: string;
+    maxLength?: number;
 };
 
 export type JsonSchemaObject = {
@@ -30,7 +33,7 @@ export const TOOLS: ToolSchema[] = [
             type: "object",
             properties: {
                 to: { type: "string" },
-                question: { type: "string" },
+                question: { type: "string", maxLength: MAX_TEXT_LEN },
                 thread_id: {
                     type: "string",
                     description:
@@ -48,18 +51,19 @@ export const TOOLS: ToolSchema[] = [
             type: "object",
             properties: {
                 ask_id: { type: "string" },
-                text: { type: "string" },
+                text: { type: "string", maxLength: MAX_TEXT_LEN },
             },
             required: ["ask_id", "text"],
         },
     },
     {
         name: "relay_broadcast",
-        description: "Broadcast a question to all other peers.",
+        description:
+            "Broadcast a question to ALL other peers on this machine, including sessions on unrelated projects. Use ONLY when the user explicitly wants every session asked. Do NOT use as a fallback when relay_ask returns an error (peer_not_found, peer_gone, timeout); surface the error to the user and let them decide. If you want to reach a specific peer, use relay_ask.",
         inputSchema: {
             type: "object",
             properties: {
-                question: { type: "string" },
+                question: { type: "string", maxLength: MAX_TEXT_LEN },
                 exclude_self: { type: "boolean" },
             },
             required: ["question"],
@@ -112,7 +116,7 @@ export const TOOLS: ToolSchema[] = [
             type: "object",
             properties: {
                 room: { type: "string", description: "Room to send to" },
-                text: { type: "string", description: "Message text" },
+                text: { type: "string", description: "Message text", maxLength: MAX_TEXT_LEN },
             },
             required: ["room", "text"],
         },

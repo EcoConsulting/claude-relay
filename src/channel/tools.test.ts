@@ -1,6 +1,39 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { PROTOCOL_VERSION } from "../protocol";
+import { MAX_TEXT_LEN, PROTOCOL_VERSION, type ServerMsg } from "../protocol";
+import type { HubConnection } from "./hub-connection";
+import { createPendingBroadcasts } from "./pending-broadcasts";
 import { rawConnect, startCh, tmpSocket, waitForNotif } from "./test-helpers";
+import { relayAsk, relayBroadcast, relayReply, relayRoomMsg, type ChannelContext } from "./tools";
+
+type RecordedSend = { type: "send"; payload: unknown };
+
+function makeFakeHub(): { hub: HubConnection; sends: RecordedSend[] } {
+    const sends: RecordedSend[] = [];
+    const hub: HubConnection = {
+        send: (payload: unknown) => {
+            sends.push({ type: "send", payload });
+        },
+        sendRequest: () => Promise.resolve({ type: "ack" } satisfies ServerMsg),
+        onMessage: () => () => {},
+        onDisconnect: () => () => {},
+        nextMessage: () => new Promise<ServerMsg>(() => {}),
+        close: () => {},
+    };
+    return { hub, sends };
+}
+
+function makeCtx(hub: HubConnection): ChannelContext {
+    return {
+        getHub: () => hub,
+        pendingBroadcasts: createPendingBroadcasts(),
+        getName: () => "tester",
+        setName: () => {},
+        nowFn: () => 0,
+        counters: { broadcast: 0 },
+        broadcastTimeoutMs: 1_000,
+        requestTimeoutMs: 1_000,
+    };
+}
 
 describe("channel tools", () => {
     let sockPath: string;
@@ -469,5 +502,80 @@ describe("channel tools", () => {
             expect(typeof meta.ask_id).toBe("string");
             expect(typeof meta.from).toBe("string");
         }
+    });
+
+    test("relay_ask returns bad_args when question exceeds MAX_TEXT_LEN and does not send", async () => {
+        const { hub, sends } = makeFakeHub();
+        const ctx = makeCtx(hub);
+        const result = await relayAsk(ctx, {
+            to: "peer",
+            question: "x".repeat(MAX_TEXT_LEN + 1),
+        });
+        expect(result.isError).toBe(true);
+        expect(JSON.parse(result.content[0]!.text)).toEqual({ ok: false, code: "bad_args" });
+        expect(sends).toEqual([]);
+    });
+
+    test("relay_ask accepts a question at MAX_TEXT_LEN and sends to hub", async () => {
+        const { hub, sends } = makeFakeHub();
+        const ctx = makeCtx(hub);
+        const result = await relayAsk(ctx, {
+            to: "peer",
+            question: "x".repeat(MAX_TEXT_LEN),
+        });
+        expect(result.isError).toBeFalsy();
+        expect(sends.length).toBe(1);
+        const payload = sends[0]!.payload as { type: string; question: string };
+        expect(payload.type).toBe("ask");
+        expect(payload.question.length).toBe(MAX_TEXT_LEN);
+    });
+
+    test("relay_reply returns bad_args when text exceeds MAX_TEXT_LEN and does not send", async () => {
+        const { hub, sends } = makeFakeHub();
+        const ctx = makeCtx(hub);
+        const result = await relayReply(ctx, {
+            ask_id: "a-1",
+            text: "y".repeat(MAX_TEXT_LEN + 1),
+        });
+        expect(result.isError).toBe(true);
+        expect(JSON.parse(result.content[0]!.text)).toEqual({ ok: false, code: "bad_args" });
+        expect(sends).toEqual([]);
+    });
+
+    test("relay_reply accepts text at MAX_TEXT_LEN and sends to hub", async () => {
+        const { hub, sends } = makeFakeHub();
+        const ctx = makeCtx(hub);
+        const result = await relayReply(ctx, {
+            ask_id: "a-1",
+            text: "y".repeat(MAX_TEXT_LEN),
+        });
+        expect(result.isError).toBeFalsy();
+        expect(sends.length).toBe(1);
+        const payload = sends[0]!.payload as { type: string; text: string };
+        expect(payload.type).toBe("reply");
+        expect(payload.text.length).toBe(MAX_TEXT_LEN);
+    });
+
+    test("relay_broadcast returns bad_args when question exceeds MAX_TEXT_LEN and does not send", async () => {
+        const { hub, sends } = makeFakeHub();
+        const ctx = makeCtx(hub);
+        const result = await relayBroadcast(ctx, {
+            question: "z".repeat(MAX_TEXT_LEN + 1),
+        });
+        expect(result.isError).toBe(true);
+        expect(JSON.parse(result.content[0]!.text)).toEqual({ ok: false, code: "bad_args" });
+        expect(sends).toEqual([]);
+    });
+
+    test("relay_room returns bad_args when text exceeds MAX_TEXT_LEN and does not send", async () => {
+        const { hub, sends } = makeFakeHub();
+        const ctx = makeCtx(hub);
+        const result = await relayRoomMsg(ctx, {
+            room: "test-room",
+            text: "z".repeat(MAX_TEXT_LEN + 1),
+        });
+        expect(result.isError).toBe(true);
+        expect(JSON.parse(result.content[0]!.text)).toEqual({ ok: false, code: "bad_args" });
+        expect(sends).toEqual([]);
     });
 });

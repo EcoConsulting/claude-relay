@@ -110,6 +110,26 @@ describe("channel lifecycle", () => {
         expect(instr).toContain("pronoun or demonstrative");
     });
 
+    test("instructions tell Claude to quote incoming channel bodies verbatim to the user", async () => {
+        const ch = await startCh({ socketPath: sockPath });
+        closers.push(() => ch.close());
+        const instr = ch.getInstructions();
+        expect(instr).toContain("verbatim");
+        expect(instr.toLowerCase()).toContain("quote");
+        expect(instr).toMatch(/<channel>/);
+    });
+
+    test("instructions forbid relay_broadcast as a fallback when relay_ask fails", async () => {
+        const ch = await startCh({ socketPath: sockPath });
+        closers.push(() => ch.close());
+        const instr = ch.getInstructions();
+        expect(instr).toMatch(/never broadcast/i);
+        expect(instr).toContain("peer_not_found");
+        expect(instr).toContain("peer_gone");
+        expect(instr).toContain("timeout");
+        expect(instr.toLowerCase()).toContain("fallback");
+    });
+
     test("exposes 9 tool stubs (5 core + 4 rooms)", async () => {
         const ch = await startCh({ socketPath: sockPath });
         closers.push(() => ch.close());

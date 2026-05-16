@@ -3,11 +3,14 @@ import { hubSocketPath } from "./data-dir";
 
 export const PROTOCOL_VERSION = "3";
 
+// 512 KiB body cap leaves headroom under the 1 MiB framing.MAX_LINE_LEN for JSON envelope and escapes.
+export const MAX_TEXT_LEN = 512 * 1024;
+
 export const RegisterMsg = z.object({
     type: z.literal("register"),
-    name: z.string(),
-    cwd: z.string(),
-    git_branch: z.string(),
+    name: z.string().max(64),
+    cwd: z.string().max(1024),
+    git_branch: z.string().max(256),
     protocol_version: z.string(),
 });
 
@@ -25,7 +28,7 @@ export const ListPeersMsg = z.object({
 export const AskMsg = z.object({
     type: z.literal("ask"),
     to: z.string(),
-    question: z.string(),
+    question: z.string().max(MAX_TEXT_LEN),
     ask_id: z.string(),
     timeout_ms: z.number().optional(),
     thread_id: z.string().optional(),
@@ -34,12 +37,12 @@ export const AskMsg = z.object({
 export const ReplyMsg = z.object({
     type: z.literal("reply"),
     ask_id: z.string(),
-    text: z.string(),
+    text: z.string().max(MAX_TEXT_LEN),
 });
 
 export const BroadcastMsg = z.object({
     type: z.literal("broadcast"),
-    question: z.string(),
+    question: z.string().max(MAX_TEXT_LEN),
     broadcast_id: z.string(),
     exclude_self: z.boolean().optional(),
 });
@@ -64,7 +67,7 @@ export const LeaveRoomMsg = z.object({
 export const RoomMsgMsg = z.object({
     type: z.literal("room_msg"),
     room: z.string(),
-    text: z.string(),
+    text: z.string().max(MAX_TEXT_LEN),
     msg_id: z.string(),
     req_id: z.string().optional(),
 });
@@ -134,7 +137,7 @@ export const PeersMsg = z.object({
 export const IncomingAskMsg = z.object({
     type: z.literal("incoming_ask"),
     from: z.string(),
-    question: z.string(),
+    question: z.string().max(MAX_TEXT_LEN),
     ask_id: z.string(),
     broadcast_id: z.string().optional(),
     thread_id: z.string().optional(),
@@ -143,7 +146,7 @@ export const IncomingAskMsg = z.object({
 export const IncomingReplyMsg = z.object({
     type: z.literal("incoming_reply"),
     from: z.string(),
-    text: z.string(),
+    text: z.string().max(MAX_TEXT_LEN),
     ask_id: z.string(),
     broadcast_id: z.string().optional(),
     thread_id: z.string().optional(),
@@ -178,7 +181,7 @@ export const IncomingRoomMsgMsg = z.object({
     type: z.literal("incoming_room_msg"),
     room: z.string(),
     from: z.string(),
-    text: z.string(),
+    text: z.string().max(MAX_TEXT_LEN),
     msg_id: z.string(),
 });
 

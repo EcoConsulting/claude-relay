@@ -27,7 +27,7 @@ export async function bootstrapHub(
 
     log.info("hub_spawn");
     const hubHandle = await hubSpawner(socketPath);
-    const sock = await waitForSocketReady(socketPath, 2000);
+    const sock = await waitForSocketReady(socketPath, process.platform === "win32" ? 5000 : 2000);
     if (!sock) {
         await hubHandle.close();
         throw new Error(`failed to connect to hub at ${socketPath} after spawn`);

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { MAX_TEXT_LEN } from "../protocol";
 import { startCh, tmpSocket } from "./test-helpers";
 
 describe("channel tool schemas", () => {
@@ -91,5 +92,30 @@ describe("channel tool schemas", () => {
         const schemas = ch.getToolSchemas();
         const reply = schemas.find((s) => s.name === "relay_reply")!;
         expect(reply.description).toMatch(/one-shot|plain/);
+    });
+
+    test("relay_ask.question, relay_reply.text, relay_broadcast.question declare maxLength MAX_TEXT_LEN", async () => {
+        const ch = await startCh({ socketPath: sockPath });
+        closers.push(() => ch.close());
+        const schemas = ch.getToolSchemas();
+        const ask = schemas.find((s) => s.name === "relay_ask")!;
+        const reply = schemas.find((s) => s.name === "relay_reply")!;
+        const bcast = schemas.find((s) => s.name === "relay_broadcast")!;
+
+        expect(ask.inputSchema.properties.question!.maxLength).toBe(MAX_TEXT_LEN);
+        expect(reply.inputSchema.properties.text!.maxLength).toBe(MAX_TEXT_LEN);
+        expect(bcast.inputSchema.properties.question!.maxLength).toBe(MAX_TEXT_LEN);
+    });
+
+    test("relay_broadcast description warns against fallback usage and unrelated-project blast radius", async () => {
+        const ch = await startCh({ socketPath: sockPath });
+        closers.push(() => ch.close());
+        const schemas = ch.getToolSchemas();
+        const bcast = schemas.find((s) => s.name === "relay_broadcast")!;
+        expect(bcast.description).toMatch(/all (other )?peers|every (other )?peer/i);
+        expect(bcast.description).toMatch(/unrelated|every session/i);
+        expect(bcast.description).toMatch(/do not use|do not broadcast|never/i);
+        expect(bcast.description).toContain("peer_not_found");
+        expect(bcast.description).toContain("timeout");
     });
 });

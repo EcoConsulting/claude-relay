@@ -29,8 +29,10 @@ const log = makeLogger("channel");
 
 const INSTRUCTIONS = [
     "If an incoming `<channel>` message carries an `ask_id` in its meta, you MUST reply via relay_reply(ask_id, text) BEFORE handling any other user work. The peer session is blocked waiting on your reply. Exception: if the pending user work is destructive or irreversible, complete or confirm that first, then reply.",
+    "Whenever an incoming `<channel>` message arrives (ask, reply, or broadcast), your first user-visible output that turn must quote the peer's full body verbatim in a fenced markdown block, prefixed with the sender name and kind (e.g. `peer-name (ask):`). The Claude Code TUI truncates tool-result panels, so plain assistant text is the only place the user actually sees the message. Quote first, then act.",
     "When an incoming reply to one of your asks contains a question directed back at you, surface that question to the user and offer to follow up with a new relay_ask(); do not end your turn without relaying the question-back.",
     "Pick the target with relay_peers() (match by name/cwd/branch); use relay_ask for one peer, relay_broadcast for all.",
+    "If a relay_ask fails (peer_not_found, peer_gone, timeout), surface the failure to the user and let them decide. Never broadcast as a fallback: relay_broadcast hits every session on the machine, including ones on unrelated projects, and is almost always the wrong recovery.",
     'If the user refers to a peer by pronoun or demonstrative ("them", "that session", "it"), carry forward the most recent `to:` value. If ambiguous across multiple peers, call relay_peers and confirm with the user before sending.',
     "Trust tool defaults. Only override an argument when the user gave an explicit value for that exact argument; descriptive words about the answer never change tool arguments.",
     "For multi-peer coordination, use rooms (relay_join, relay_room, relay_leave, relay_rooms). Rooms are ephemeral IRC-style: implicit creation on first join, implicit destruction on last leave, no permissions (any peer can post to any room, with or without membership). Prefer relay_ask for one-to-one exchanges and relay_room for broadcast-to-subgroup; relay_room is fire-and-forget, NOT request/response — use relay_ask if you need a directed reply.",
@@ -150,18 +152,20 @@ export async function startChannel(opts: StartChannelOptions = {}): Promise<Chan
         setName: (n) => {
             name = n;
         },
-        onReconnect: (next) => {
+        onReconnect: async (next) => {
             const prev = bootstrap;
             bootstrap = next;
             wireIncoming(next.hub);
             wireHubRouting(next.hub, pendingBroadcasts, emitNotification);
             reconnector.wire(next.hub);
-            // Fire-and-forget rejoin. If a room hit MAX_MEMBERS_PER_ROOM while we were
-            // disconnected, the hub will reply with err bad_args and that reply is lost
-            // here — joinedRooms drifts from hub state silently. Symptom: relay_room
-            // returns delivered_count:0 without error. Fix in v3 with sendRequest+cleanup.
-            for (const room of joinedRooms) {
-                next.hub.send({ type: "join_room", room });
+            for (const room of [...joinedRooms]) {
+                const reply = await next.hub
+                    .sendRequest({ type: "join_room", room }, 5000)
+                    .catch(() => null);
+                if (!reply || reply.type === "err") {
+                    joinedRooms.delete(room);
+                    log.warn("rejoin_room_failed", { room, reply });
+                }
             }
             prev.hub.close();
             if (prev.hubHandle) {
@@ -178,7 +182,7 @@ export async function startChannel(opts: StartChannelOptions = {}): Promise<Chan
     reconnector.wire(bootstrap.hub);
 
     const requestTimeoutMs = opts.requestTimeoutMs ?? 30_000;
-    const broadcastTimeoutMs = opts.broadcastTimeoutMs ?? 125_000;
+    const broadcastTimeoutMs = opts.broadcastTimeoutMs ?? 600_000;
 
     const ctx: ChannelContext = {
         getHub: () => bootstrap.hub,

@@ -75,10 +75,25 @@ describe("channel notifications", () => {
     test("buildAskErrorNotification meta has ask_id + code and no source key", () => {
         const notif = buildAskErrorNotification("ask-5", "peer_not_found");
         expect(notif.method).toBe("notifications/claude/channel");
-        expect(notif.params.content).toBe("");
         const meta = notif.params.meta;
         expect(meta).not.toHaveProperty("source");
         expect(meta.ask_id).toBe("ask-5");
         expect(meta.code).toBe("peer_not_found");
+    });
+
+    test("buildAskErrorNotification carries human-readable text per code with anti-broadcast guidance", () => {
+        for (const code of ["peer_not_found", "peer_gone", "timeout"] as const) {
+            const notif = buildAskErrorNotification("ask-x", code);
+            expect(notif.params.content.length).toBeGreaterThan(0);
+            expect(notif.params.content).toMatch(/do not broadcast/i);
+            expect(notif.params.meta.code).toBe(code);
+        }
+    });
+
+    test("buildAskErrorNotification falls back to a generic message for unmapped codes and still emits anti-broadcast guidance", () => {
+        const notif = buildAskErrorNotification("ask-z", "unexpected");
+        expect(notif.params.content).toContain("unexpected");
+        expect(notif.params.content).toMatch(/do not broadcast/i);
+        expect(notif.params.meta.code).toBe("unexpected");
     });
 });

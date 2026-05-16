@@ -13,12 +13,14 @@ Running two Claude sessions on different projects? In one, say _"ask the backend
 Two parallel features built on top of the upstream v0.1.0, validated with a runtime 3-peer scenario:
 
 **Block 1 — Fixed identity** (zombie eviction):
+
 - `RELAY_PEER_ID` env var pins a session to a stable name across restarts. No more `-2` / `-3` suffixes when you reopen a session that crashed.
 - The hub probes name collisions with a 500ms ping. If the existing peer doesn't respond, its slot is freed automatically.
 - Proactive 30-second sweep evicts non-responsive peers (orphan plugins whose Claude Code parent died but whose socket is still up).
 - Cross-platform parent-death detection on Windows.
 
 **Block 2 — Ephemeral rooms** (subgroup messaging):
+
 - Four new MCP tools: `relay_join`, `relay_leave`, `relay_room`, `relay_rooms`.
 - IRC-style lifecycle: rooms are created on first join, destroyed when the last member leaves. No permissions, no persistence.
 - Auto-rejoin on hub reconnect.

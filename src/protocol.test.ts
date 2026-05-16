@@ -180,6 +180,50 @@ describe("protocol client messages", () => {
         const m2 = { type: "list_rooms" as const, req_id: "r4" };
         expect(ListRoomsMsg.parse(m2)).toEqual(m2);
     });
+
+    test("AskMsg.question accepts 100 KB and rejects 600 KB", () => {
+        const small = "a".repeat(100 * 1024);
+        const big = "a".repeat(600 * 1024);
+        expect(
+            AskMsg.parse({ type: "ask", to: "bob", question: small, ask_id: "a1" }).question.length,
+        ).toBe(small.length);
+        expect(() =>
+            AskMsg.parse({ type: "ask", to: "bob", question: big, ask_id: "a1" }),
+        ).toThrow();
+    });
+
+    test("ReplyMsg.text accepts 100 KB and rejects 600 KB", () => {
+        const small = "x".repeat(100 * 1024);
+        const big = "x".repeat(600 * 1024);
+        expect(ReplyMsg.parse({ type: "reply", ask_id: "a1", text: small }).text.length).toBe(
+            small.length,
+        );
+        expect(() => ReplyMsg.parse({ type: "reply", ask_id: "a1", text: big })).toThrow();
+    });
+
+    test("BroadcastMsg.question accepts 100 KB and rejects 600 KB", () => {
+        const small = "q".repeat(100 * 1024);
+        const big = "q".repeat(600 * 1024);
+        expect(
+            BroadcastMsg.parse({ type: "broadcast", question: small, broadcast_id: "b1" }).question
+                .length,
+        ).toBe(small.length);
+        expect(() =>
+            BroadcastMsg.parse({ type: "broadcast", question: big, broadcast_id: "b1" }),
+        ).toThrow();
+    });
+
+    test("RoomMsgMsg.text accepts 100 KB and rejects 600 KB", () => {
+        const small = "r".repeat(100 * 1024);
+        const big = "r".repeat(600 * 1024);
+        expect(
+            RoomMsgMsg.parse({ type: "room_msg", room: "x", text: small, msg_id: "m1" }).text
+                .length,
+        ).toBe(small.length);
+        expect(() =>
+            RoomMsgMsg.parse({ type: "room_msg", room: "x", text: big, msg_id: "m1" }),
+        ).toThrow();
+    });
 });
 
 describe("protocol server messages", () => {
@@ -206,6 +250,33 @@ describe("protocol server messages", () => {
     test("incoming_ask round-trips", () => {
         const m = { type: "incoming_ask" as const, from: "a", question: "?", ask_id: "a1" };
         expect(IncomingAskMsg.parse(m)).toEqual(m);
+    });
+
+    test("IncomingAskMsg.question rejects 600 KB", () => {
+        const big = "a".repeat(600 * 1024);
+        expect(() =>
+            IncomingAskMsg.parse({ type: "incoming_ask", from: "a", question: big, ask_id: "a1" }),
+        ).toThrow();
+    });
+
+    test("IncomingReplyMsg.text rejects 600 KB", () => {
+        const big = "x".repeat(600 * 1024);
+        expect(() =>
+            IncomingReplyMsg.parse({ type: "incoming_reply", from: "a", text: big, ask_id: "a1" }),
+        ).toThrow();
+    });
+
+    test("IncomingRoomMsgMsg.text rejects 600 KB", () => {
+        const big = "r".repeat(600 * 1024);
+        expect(() =>
+            IncomingRoomMsgMsg.parse({
+                type: "incoming_room_msg",
+                room: "x",
+                from: "a",
+                text: big,
+                msg_id: "m1",
+            }),
+        ).toThrow();
     });
 
     test("incoming_reply round-trips", () => {

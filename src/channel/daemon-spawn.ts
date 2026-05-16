@@ -45,12 +45,34 @@ export async function waitForSocketReady(
 export async function spawnDetachedDaemon(
     socketPath: string,
 ): Promise<{ close: () => Promise<void> }> {
-    const child = spawn("bun", ["run", DAEMON_ENTRY], {
-        env: { ...process.env, RELAY_HUB_SOCKET: socketPath },
-        detached: true,
-        stdio: ["ignore", "ignore", "ignore"],
-    });
-    child.unref();
+    const env = Object.fromEntries(
+        Object.entries({
+            PATH: process.env.PATH,
+            HOME: process.env.HOME,
+            USERPROFILE: process.env.USERPROFILE,
+            SystemRoot: process.env.SystemRoot,
+            TEMP: process.env.TEMP,
+            TMP: process.env.TMP,
+            TMPDIR: process.env.TMPDIR,
+            RELAY_HUB_SOCKET: socketPath,
+            CLAUDE_PLUGIN_DATA: process.env.CLAUDE_PLUGIN_DATA,
+        }).filter(([, v]) => v !== undefined),
+    );
+    if (process.platform === "win32") {
+        spawn("cmd.exe", ["/c", "start", '""', "/b", "bun", "run", DAEMON_ENTRY], {
+            env,
+            stdio: "ignore",
+            detached: true,
+            cwd: path.dirname(DAEMON_ENTRY),
+        }).unref();
+    } else {
+        const child = spawn("bun", ["run", DAEMON_ENTRY], {
+            env,
+            detached: true,
+            stdio: ["ignore", "ignore", "ignore"],
+        });
+        child.unref();
+    }
     return {
         close: async () => {
             // Daemon is independent; do not kill on channel close.

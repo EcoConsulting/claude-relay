@@ -1,4 +1,4 @@
-import type { ErrCode } from "../protocol";
+import { MAX_TEXT_LEN, type ErrCode } from "../protocol";
 import type { HubConnection } from "./hub-connection";
 import type { BroadcastAckResult, PendingBroadcasts } from "./pending-broadcasts";
 
@@ -72,6 +72,7 @@ export async function relayAsk(
     const to = args.to;
     const question = args.question;
     if (typeof to !== "string" || typeof question !== "string") return errResult("bad_args");
+    if (question.length > MAX_TEXT_LEN) return errResult("bad_args");
     const threadId = typeof args.thread_id === "string" ? args.thread_id : undefined;
     const askId = crypto.randomUUID();
     ctx.getHub().send({
@@ -91,6 +92,7 @@ export async function relayReply(
     const askId = args.ask_id;
     const text = args.text;
     if (typeof askId !== "string" || typeof text !== "string") return errResult("bad_args");
+    if (text.length > MAX_TEXT_LEN) return errResult("bad_args");
     ctx.getHub().send({ type: "reply", ask_id: askId, text });
     return okResult({ ok: true });
 }
@@ -101,6 +103,7 @@ export async function relayBroadcast(
 ): Promise<ToolResult> {
     const question = args.question;
     if (typeof question !== "string") return errResult("bad_args");
+    if (question.length > MAX_TEXT_LEN) return errResult("bad_args");
     const excludeSelf = typeof args.exclude_self === "boolean" ? args.exclude_self : true;
     const broadcastId = `bcast-${ctx.getName()}-${++ctx.counters.broadcast}-${ctx.nowFn()}`;
     const pending = ctx.pendingBroadcasts.create(broadcastId, ctx.broadcastTimeoutMs);
@@ -148,6 +151,7 @@ export async function relayRoomMsg(
     const room = args.room;
     const text = args.text;
     if (typeof room !== "string" || typeof text !== "string") return errResult("bad_args");
+    if (text.length > MAX_TEXT_LEN) return errResult("bad_args");
     const msgId = crypto.randomUUID();
     const reply = await ctx
         .getHub()

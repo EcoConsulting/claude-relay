@@ -32,9 +32,17 @@ export function buildReplyNotification(
 }
 
 export function buildAskErrorNotification(askId: string, code: ErrCode): ChannelNotification {
+    const prefixes: Partial<Record<ErrCode, string>> = {
+        peer_not_found: "ask failed: target peer is not registered.",
+        peer_gone: "ask failed: target peer disconnected before replying.",
+        timeout:
+            "ask timed out: target peer did not reply within the timeout. The peer may still respond later.",
+    };
+    const prefix = prefixes[code] ?? `ask failed: ${code}.`;
+    const content = `${prefix} Surface this to the user; do not broadcast as a fallback.`;
     return {
         method: METHOD,
-        params: { content: "", meta: { ask_id: askId, code } },
+        params: { content, meta: { ask_id: askId, code } },
     };
 }
 

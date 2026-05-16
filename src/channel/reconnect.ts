@@ -16,7 +16,7 @@ export type ReconnectorOptions = {
     skipRegister?: boolean;
     getName: () => string;
     setName: (name: string) => void;
-    onReconnect: (next: HubBootstrap) => void;
+    onReconnect: (next: HubBootstrap) => void | Promise<void>;
 };
 
 export type Reconnector = ReturnType<typeof createReconnector>;
@@ -28,6 +28,7 @@ function delayFor(attempt: number): number {
 export function createReconnector(opts: ReconnectorOptions) {
     let closed = false;
     let reconnecting = false;
+    let disconnectedDuringReconnect = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     async function abort(next: HubBootstrap): Promise<void> {
@@ -44,7 +45,11 @@ export function createReconnector(opts: ReconnectorOptions) {
     }
 
     const scheduleReconnect = (): void => {
-        if (closed || reconnecting) return;
+        if (closed) return;
+        if (reconnecting) {
+            disconnectedDuringReconnect = true;
+            return;
+        }
         reconnecting = true;
         let attempt = 0;
 
@@ -77,9 +82,14 @@ export function createReconnector(opts: ReconnectorOptions) {
                     log.warn("channel_reregistered", { from: currentName, to: newName });
                     opts.setName(newName);
                 }
-                opts.onReconnect(next);
+                await opts.onReconnect(next);
                 log.info("channel_reconnected", { hubRole: next.hubRole, name: opts.getName() });
                 reconnecting = false;
+                if (disconnectedDuringReconnect) {
+                    disconnectedDuringReconnect = false;
+                    log.warn("hub_lost_during_reconnect", { rescheduling: true });
+                    scheduleReconnect();
+                }
             } catch (e) {
                 attempt += 1;
                 log.warn("reconnect_attempt_failed", {

@@ -18,7 +18,7 @@ export function createPendingBroadcasts() {
         return new Promise<BroadcastAckResult>((resolve) => {
             const timer = setTimeout(() => {
                 if (pending.delete(broadcastId)) {
-                    resolve({ ok: false, code: "hub_unreachable" });
+                    resolve({ ok: false, code: "timeout" });
                 }
             }, timeoutMs);
             pending.set(broadcastId, { resolve, timer });
